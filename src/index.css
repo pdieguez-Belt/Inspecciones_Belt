@@ -1,0 +1,29 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    font-family: 'Montserrat', system-ui, sans-serif;
+    background-color: #0a0a0a;
+    color: #ffffff;
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+    margin: 0;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-belt-yellow text-belt-black font-bold py-3 px-6 rounded-lg hover:brightness-110 active:scale-95 transition-all duration-200 uppercase tracking-wide text-sm;
+  }
+}
+
+/* Mobile safe area */
+@supports (padding: max(0px)) {
+  .safe-bottom { padding-bottom: max(1rem, env(safe-area-inset-bottom)); }
+  .safe-top { padding-top: max(0px, env(safe-area-inset-top)); }
+}
