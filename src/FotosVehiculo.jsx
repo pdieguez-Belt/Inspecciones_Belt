@@ -1,8 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { ArrowLeft, Camera, RotateCcw, CheckCircle, Download, X, Save, Upload, Image, Car, Bike, MessageCircle } from 'lucide-react'
 
-const APP_VERSION = '1.2.0'
-const VENDEDOR_WHATSAPP = '5491159550724'
+const APP_VERSION = '1.2.1'
 
 function generarNumeroGestion() {
   const now = new Date()
@@ -347,16 +346,18 @@ export default function FotosVehiculo() {
     setPhase('camera')
   }
 
-  // Send WhatsApp with gestion details
+  // Send WhatsApp with gestion details (ping QR for tracking)
   const handleWhatsApp = () => {
-    const msg = `*BELT Seguros - Inspección Vehicular*%0A%0A` +
-      `N° de Gestión: *${numGestion}*%0A` +
+    // Tracking ping al QR
+    fetch('https://uqr.to/28imm', { mode: 'no-cors' }).catch(() => {})
+    // Abrir WhatsApp con mensaje completo
+    const msg = `*INSPECCIÓN REALIZADA*%0A%0A` +
+      `*Mi número de inspección es el ${numGestion}*%0A%0A` +
       `DNI: *${dni.trim()}*%0A` +
       `Tipo: *${vehicleType === 'moto' ? 'Moto' : 'Auto'}*%0A` +
       `Fotos: ${photos.length}%0A` +
-      `Fecha: ${new Date().toLocaleDateString('es-AR')}%0A%0A` +
-      `Las fotos están disponibles en el servidor.`
-    window.open(`https://wa.me/${VENDEDOR_WHATSAPP}?text=${msg}`, '_blank')
+      `Fecha: ${new Date().toLocaleDateString('es-AR')}`
+    window.open(`https://wa.me/5491125333156?text=${msg}`, '_blank')
   }
 
   const goBack = () => {
