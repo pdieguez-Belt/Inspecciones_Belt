@@ -9,8 +9,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const app = express()
 const PORT = 3003
 
-// Carpeta destino: BELT/database/imagenes/vehiculos_asegurados/
-const DB_BASE = path.resolve(__dirname, '..', 'BELT', 'database', 'imagenes', 'vehiculos_asegurados')
+// Carpeta destino: configurable por entorno
+// LOCAL: carpeta relativa para desarrollo
+// SERVIDOR: D:/Fotos - Asegurados
+const DB_BASE = process.env.DB_BASE || path.resolve(__dirname, 'database', 'imagenes', 'vehiculos_asegurados')
 
 app.use(cors())
 app.use(express.json())

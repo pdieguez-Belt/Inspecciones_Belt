@@ -1,20 +1,17 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+import basicSsl from '@vitejs/plugin-basic-ssl'
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), basicSsl()],
   server: {
     host: true,
     allowedHosts: ['fotos-belt.proyectopd.com.ar'],
     hmr: {
-      clientPort: 443,
-      protocol: 'wss',
-      host: 'fotos-belt.proyectopd.com.ar',
       overlay: false,
-      timeout: 5000,
     },
     proxy: {
-      '/api': 'http://localhost:3004',
+      '/api': 'http://localhost:3003',
     },
   },
 })

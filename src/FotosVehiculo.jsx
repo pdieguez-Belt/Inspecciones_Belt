@@ -1,5 +1,17 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
-import { ArrowLeft, Camera, RotateCcw, CheckCircle, Download, X, Save, Upload, Image, Car, Bike } from 'lucide-react'
+import { ArrowLeft, Camera, RotateCcw, CheckCircle, Download, X, Save, Upload, Image, Car, Bike, MessageCircle } from 'lucide-react'
+
+const APP_VERSION = '1.2.0'
+const VENDEDOR_WHATSAPP = '5491159550724'
+
+function generarNumeroGestion() {
+  const now = new Date()
+  const year = now.getFullYear().toString().slice(-2)
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+  const random = Math.floor(Math.random() * 9000 + 1000)
+  return `BELT-${year}${month}${day}-${random}`
+}
 
 // ── AUTO: 9 fotos en 3 secciones ──
 const STEPS_AUTO = [
@@ -12,8 +24,6 @@ const STEPS_AUTO = [
   { id: 'tablero',      fullLabel: 'Tablero',                   instruction: 'Foto con el tablero encendido.',                   section: 'B', sectionLabel: 'Identificación y Datos', view: 'tablero' },
   { id: 'cedula-f',     fullLabel: 'Cédula Frente',             instruction: 'Frente de la cédula del titular.',                 section: 'B', sectionLabel: 'Identificación y Datos', view: 'cedula-frente' },
   { id: 'cedula-d',     fullLabel: 'Cédula Dorso',              instruction: 'Dorso de la cédula del titular.',                  section: 'B', sectionLabel: 'Identificación y Datos', view: 'cedula-dorso' },
-  { id: 'dni-f',        fullLabel: 'DNI Frente',                instruction: 'Frente del DNI del titular.',                      section: 'B', sectionLabel: 'Identificación y Datos', view: 'dni-frente' },
-  { id: 'dni-d',        fullLabel: 'DNI Dorso',                 instruction: 'Dorso del DNI del titular.',                       section: 'B', sectionLabel: 'Identificación y Datos', view: 'dni-dorso' },
   // Sección C – Estado Exterior
   { id: 'cristales',    fullLabel: 'Cristales y Parabrisas',    instruction: 'Registro de daños en cristales.',                  section: 'C', sectionLabel: 'Estado Exterior',       view: 'cristales' },
   { id: 'neumaticos',   fullLabel: 'Neumáticos (Desgaste)',     instruction: 'Detalle del estado y desgaste.',                   section: 'C', sectionLabel: 'Estado Exterior',       view: 'neumaticos' },
@@ -32,8 +42,6 @@ const STEPS_MOTO = [
   { id: 'tablero',      fullLabel: 'Tablero',                   instruction: 'Foto con el tablero encendido.',                   section: 'B', sectionLabel: 'Identificación y Datos', view: 'tablero' },
   { id: 'cedula-f',     fullLabel: 'Cédula Frente',             instruction: 'Frente de la cédula del titular.',                 section: 'B', sectionLabel: 'Identificación y Datos', view: 'cedula-frente' },
   { id: 'cedula-d',     fullLabel: 'Cédula Dorso',              instruction: 'Dorso de la cédula del titular.',                  section: 'B', sectionLabel: 'Identificación y Datos', view: 'cedula-dorso' },
-  { id: 'dni-f',        fullLabel: 'DNI Frente',                instruction: 'Frente del DNI del titular.',                      section: 'B', sectionLabel: 'Identificación y Datos', view: 'dni-frente' },
-  { id: 'dni-d',        fullLabel: 'DNI Dorso',                 instruction: 'Dorso del DNI del titular.',                       section: 'B', sectionLabel: 'Identificación y Datos', view: 'dni-dorso' },
 ]
 
 function fmtShort(d) {
@@ -168,11 +176,11 @@ export default function FotosVehiculo() {
 
   // Form data
   const [dni,       setDni]       = useState('')
-  const [patente,   setPatente]   = useState('')
   const [uploading, setUploading] = useState(false)
   const [uploadMsg, setUploadMsg] = useState(null)
   const [uploadErr, setUploadErr] = useState(null)
   const [saved,     setSaved]     = useState(false)
+  const [numGestion, setNumGestion] = useState(null)
 
   const STEPS = vehicleType === 'moto' ? STEPS_MOTO : STEPS_AUTO
   const step = STEPS[stepIdx] || STEPS[0]
@@ -283,14 +291,18 @@ export default function FotosVehiculo() {
 
   // Upload photos to server
   const handleUpload = async () => {
-    if (!dni.trim() || !patente.trim()) return
+    if (!dni.trim()) return
     setUploading(true)
     setUploadErr(null)
 
+    const dniClean = dni.trim().replace(/\./g, '').replace(/\s/g, '')
+    const random = Math.floor(Math.random() * 9000 + 1000)
+    const gestion = `BELT-${dniClean}-${random}`
     const formData = new FormData()
-    formData.append('dni', dni.trim())
-    formData.append('patente', patente.trim().toUpperCase())
+    formData.append('dni', dniClean)
+    formData.append('patente', dniClean)
     formData.append('tipo', vehicleType)
+    formData.append('gestion', gestion)
     photos.forEach(p => formData.append('fotos', p.blob, `foto.jpg`))
 
     try {
@@ -298,6 +310,7 @@ export default function FotosVehiculo() {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Error del servidor')
       setUploadMsg(data.carpeta)
+      setNumGestion(gestion)
       setSaved(true)
       setPhase('complete')
     } catch (err) {
@@ -310,7 +323,7 @@ export default function FotosVehiculo() {
   // Save all photos to device gallery
   const handleSaveToGallery = async () => {
     const files = photos.map((p, i) => {
-      const filename = `BELT_${STEPS[i].id}_${dni.trim()}_${patente.trim()}.jpg`
+      const filename = `BELT_${STEPS[i].id}_${dni.trim()}.jpg`
       return new File([p.blob], filename, { type: 'image/jpeg' })
     })
 
@@ -334,13 +347,25 @@ export default function FotosVehiculo() {
     setPhase('camera')
   }
 
+  // Send WhatsApp with gestion details
+  const handleWhatsApp = () => {
+    const msg = `*BELT Seguros - Inspección Vehicular*%0A%0A` +
+      `N° de Gestión: *${numGestion}*%0A` +
+      `DNI: *${dni.trim()}*%0A` +
+      `Tipo: *${vehicleType === 'moto' ? 'Moto' : 'Auto'}*%0A` +
+      `Fotos: ${photos.length}%0A` +
+      `Fecha: ${new Date().toLocaleDateString('es-AR')}%0A%0A` +
+      `Las fotos están disponibles en el servidor.`
+    window.open(`https://wa.me/${VENDEDOR_WHATSAPP}?text=${msg}`, '_blank')
+  }
+
   const goBack = () => {
     streamRef.current?.getTracks().forEach(t => t.stop())
     streamRef.current = null
     setVehicleType(null); setPhase('select'); setStepIdx(0);
-    setPhotos([]); setPreview(null); setDni(''); setPatente('');
+    setPhotos([]); setPreview(null); setDni('');
     setUploadMsg(null); setUploadErr(null); setSaved(false);
-    setCamReady(false); setCamError(null);
+    setCamReady(false); setCamError(null); setNumGestion(null);
   }
 
   // ── SELECT screen (Auto / Moto) ─────────────────────────────
@@ -378,6 +403,7 @@ export default function FotosVehiculo() {
         </div>
         <p className="text-gray-600 text-[10px] mt-8 text-center uppercase tracking-widest font-bold">BELT Seguros · Inspección Digital</p>
       </div>
+      <p className="fixed bottom-3 right-3 text-gray-600 text-[10px] font-mono">v{APP_VERSION}</p>
     </div>
   )
 
@@ -394,6 +420,14 @@ export default function FotosVehiculo() {
         </div>
       </div>
       <div className="flex-1 overflow-y-auto px-4 py-6">
+        {numGestion && (
+          <div className="bg-belt-yellow/10 border border-belt-yellow/30 rounded-xl p-4 mb-5">
+            <p className="text-belt-yellow text-xs font-bold uppercase tracking-wide mb-1">N° de Gestión</p>
+            <p className="text-white font-black text-2xl font-mono">{numGestion}</p>
+            <p className="text-gray-400 text-xs mt-1">DNI: <span className="text-white font-bold">{dni.trim()}</span></p>
+          </div>
+        )}
+
         {uploadMsg && (
           <div className="bg-green-900/30 border border-green-500/30 rounded-xl p-4 mb-5">
             <p className="text-green-400 text-sm font-bold flex items-center gap-2"><Save size={14}/> Guardado exitoso</p>
@@ -412,23 +446,25 @@ export default function FotosVehiculo() {
           ))}
         </div>
 
+        <button onClick={handleWhatsApp}
+          className="w-full flex items-center justify-center gap-2 bg-green-600 active:bg-green-700 text-white font-bold py-4 rounded-xl transition-all mb-3">
+          <MessageCircle size={18}/> Enviar datos por WhatsApp
+        </button>
+
         <button onClick={handleSaveToGallery}
           className="w-full flex items-center justify-center gap-2 bg-white/10 active:bg-white/20 text-white font-bold py-4 rounded-xl transition-all mb-3">
           <Image size={16}/> Guardar en mi fototeca
         </button>
 
-        <button onClick={() => {
-          setVehicleType(null); setPhase('select'); setStepIdx(0);
-          setPhotos([]); setPreview(null); setDni(''); setPatente('');
-          setUploadMsg(null); setUploadErr(null); setSaved(false);
-        }} className="w-full btn-primary flex items-center justify-center gap-2 py-4 text-base">
+        <button onClick={goBack} className="w-full btn-primary flex items-center justify-center gap-2 py-4 text-base">
           <CheckCircle size={16}/> Finalizar
         </button>
       </div>
+      <p className="fixed bottom-3 right-3 text-gray-600 text-[10px] font-mono">v{APP_VERSION}</p>
     </div>
   )
 
-  // ── FORM screen (DNI + Patente) ──────────────────────────────
+  // ── FORM screen (Patente) ──────────────────────────────────
   if (phase === 'form') return (
     <div className="min-h-screen bg-belt-dark flex flex-col safe-top safe-bottom">
       <div className="flex items-center gap-3 px-4 py-4 border-b border-white/10">
@@ -457,24 +493,14 @@ export default function FotosVehiculo() {
         {/* Form */}
         <div className="space-y-4 mb-6">
           <div>
-            <label className="text-gray-400 text-xs font-bold uppercase tracking-wide mb-1.5 block">DNI del cliente</label>
+            <label className="text-gray-400 text-xs font-bold uppercase tracking-wide mb-1.5 block">DNI del titular</label>
             <input
               type="text"
               inputMode="numeric"
-              placeholder="Ej: 35123456"
+              placeholder="Ej: 35.123.456"
               value={dni}
               onChange={e => setDni(e.target.value)}
               className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3.5 text-white text-lg font-bold placeholder-gray-500 focus:outline-none focus:border-belt-yellow focus:ring-1 focus:ring-belt-yellow transition-all"
-            />
-          </div>
-          <div>
-            <label className="text-gray-400 text-xs font-bold uppercase tracking-wide mb-1.5 block">Patente del vehículo</label>
-            <input
-              type="text"
-              placeholder="Ej: ABC123 o AB123CD"
-              value={patente}
-              onChange={e => setPatente(e.target.value.toUpperCase())}
-              className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3.5 text-white text-lg font-bold placeholder-gray-500 focus:outline-none focus:border-belt-yellow focus:ring-1 focus:ring-belt-yellow transition-all uppercase"
             />
           </div>
         </div>
@@ -487,7 +513,7 @@ export default function FotosVehiculo() {
 
         <button
           onClick={handleUpload}
-          disabled={!dni.trim() || !patente.trim() || uploading}
+          disabled={!dni.trim() || uploading}
           className="w-full btn-primary flex items-center justify-center gap-2 py-4 text-base disabled:opacity-40 disabled:cursor-not-allowed"
         >
           {uploading ? (
@@ -597,17 +623,15 @@ export default function FotosVehiculo() {
       <div className="absolute bottom-0 inset-x-0 z-20 safe-bottom"
         style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.9) 0%, transparent 100%)' }}>
         <div className="px-6 pt-6 pb-5">
-          {/* Progress dots */}
-          <div className="flex justify-center gap-1.5 mb-3">
-            {STEPS.map((s, i) => (
-              <div key={i} className={`h-1.5 rounded-full transition-all duration-300 ${
-                i < stepIdx ? 'w-4 bg-belt-yellow' :
-                i === stepIdx ? 'w-8 bg-belt-yellow' : 'w-2 bg-white/25'}`}/>
-            ))}
+          {/* Progress bar */}
+          <div className="flex items-center gap-3 mb-3">
+            <div className="flex-1 bg-white/10 rounded-full h-2.5">
+              <div className="bg-belt-yellow h-2.5 rounded-full transition-all duration-500" style={{ width: `${((stepIdx + 1) / STEPS.length) * 100}%` }}/>
+            </div>
+            <span className="text-belt-yellow text-xs font-bold tabular-nums w-10 text-right">{Math.round(((stepIdx + 1) / STEPS.length) * 100)}%</span>
           </div>
-
-          <p className="text-white text-center font-bold text-sm mb-1">{step.fullLabel}</p>
-          <p className="text-gray-400 text-center text-xs mb-4">{step.instruction}</p>
+          <p className="text-white text-center font-bold text-base mb-1">{step.fullLabel}</p>
+          <p className="text-gray-300 text-center text-sm mb-4">{step.instruction}</p>
 
           {/* Shutter button */}
           <div className="flex items-center justify-center">
