@@ -1,5 +1,5 @@
-const CACHE_NAME = 'belt-fotos-v3'
-const PRECACHE = ['/manifest.json', '/logo-belt.png', '/icons/icon-192.png', '/icons/icon-512.png']
+const CACHE_NAME = 'belt-fotos-v7'
+const PRECACHE = ['/manifest.json']
 
 self.addEventListener('install', (e) => {
   e.waitUntil(
@@ -17,10 +17,11 @@ self.addEventListener('activate', (e) => {
 
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url)
-  // Never cache: API calls, images, HTML navigation
+  // Never cache: API calls, images, PNGs, HTML navigation
   if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/img/')) return
+  if (url.pathname.endsWith('.png') || url.pathname.endsWith('.mp4')) return
   if (e.request.mode === 'navigate') return
-  // Only cache static assets (JS, CSS, fonts, icons)
+  // Only cache static assets (JS, CSS, fonts)
   if (e.request.method !== 'GET') return
   e.respondWith(
     caches.match(e.request).then(cached => cached || fetch(e.request).then(res => {

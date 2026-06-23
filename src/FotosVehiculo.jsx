@@ -1,7 +1,11 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
-import { ArrowLeft, Camera, RotateCcw, CheckCircle, Download, X, Save, Upload, Image, Car, Bike, MessageCircle } from 'lucide-react'
+import { ArrowLeft, Camera, RotateCcw, CheckCircle, Download, X, Save, Upload, Image, Car, Bike, MessageCircle, Zap, ZapOff } from 'lucide-react'
 
-const APP_VERSION = '1.2.1'
+const APP_VERSION = '1.3.6'
+
+// Preload logo for watermark
+const logoImg = new window.Image()
+logoImg.src = `/logo-belt.png?v=${Date.now()}`
 
 function generarNumeroGestion() {
   const now = new Date()
@@ -94,68 +98,93 @@ function VehicleSilhouette({ view }) {
 }
 
 // ── Watermark applied to canvas after capture ────────────────────
-function applyWatermark(canvas, step) {
+function applyWatermark(canvas, step, geoCoords, locality) {
   const ctx = canvas.getContext('2d')
   const W = canvas.width, H = canvas.height
   const now = new Date()
+  const timestamp = fmtShort(now)
+  const geoStr = locality || (geoCoords ? `${geoCoords.lat.toFixed(4)}, ${geoCoords.lng.toFixed(4)}` : 'Sin ubicación')
 
-  // Top bar – step label only (date/time already in bottom bar)
-  const topH = Math.max(52, Math.floor(H * 0.08))
-  ctx.fillStyle = 'rgba(0,0,0,0.82)'
+  // ─── 1. MARCA DE AGUA: fecha/hora/localidad centrada en parte superior ───
+  ctx.save()
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  const wmFontSize = Math.max(28, Math.floor(W * 0.058))
+  const centerX = W / 2
+  const wmY = Math.floor(H * 0.13)
+  // Sombra muy fuerte para legibilidad en fondos claros
+  ctx.shadowColor = 'rgba(0,0,0,1)'
+  ctx.shadowBlur = 16
+  ctx.shadowOffsetX = 0
+  ctx.shadowOffsetY = 0
+  // Fecha y hora (grande)
+  ctx.fillStyle = 'rgba(255,255,255,0.45)'
+  ctx.font = `900 ${wmFontSize}px Arial`
+  ctx.fillText(timestamp, centerX, wmY)
+  ctx.fillText(timestamp, centerX, wmY)
+  // Localidad - dividir en 2 líneas si no entra
+  const geoFontSize = Math.floor(wmFontSize * 0.7)
+  ctx.font = `900 ${geoFontSize}px Arial`
+  ctx.fillStyle = 'rgba(255,255,255,0.40)'
+  const maxW = W * 0.9
+  if (ctx.measureText(geoStr).width <= maxW) {
+    ctx.fillText(geoStr, centerX, wmY + wmFontSize * 1.5)
+    ctx.fillText(geoStr, centerX, wmY + wmFontSize * 1.5)
+  } else {
+    // Dividir por la coma más cercana al medio
+    const mid = Math.floor(geoStr.length / 2)
+    let splitIdx = geoStr.lastIndexOf(',', mid)
+    if (splitIdx < 3) splitIdx = geoStr.indexOf(',', mid)
+    if (splitIdx < 0) splitIdx = mid
+    const line1 = geoStr.slice(0, splitIdx + 1).trim()
+    const line2 = geoStr.slice(splitIdx + 1).trim()
+    const lineH = geoFontSize * 1.3
+    ctx.fillText(line1, centerX, wmY + wmFontSize * 1.5)
+    ctx.fillText(line1, centerX, wmY + wmFontSize * 1.5)
+    ctx.fillText(line2, centerX, wmY + wmFontSize * 1.5 + lineH)
+    ctx.fillText(line2, centerX, wmY + wmFontSize * 1.5 + lineH)
+  }
+  ctx.restore()
+
+  // ─── 2. TOP BANNER ───
+  const topH = Math.max(52, Math.floor(H * 0.07))
+  const px = Math.floor(W * 0.02)
+  ctx.fillStyle = 'rgba(0,0,0,0.88)'
   ctx.fillRect(0, 0, W, topH)
-  // Yellow accent
   ctx.fillStyle = '#c9e100'
-  ctx.fillRect(0, 0, Math.max(4, Math.floor(W * 0.006)), topH)
-  const px = Math.floor(W * 0.028)
-  const line1Y = Math.floor(topH * 0.38)
-  const line2Y = Math.floor(topH * 0.78)
-  ctx.fillStyle = '#c9e100'
-  ctx.font = `bold ${Math.floor(topH * 0.36)}px Arial`
-  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic'
-  ctx.fillText(step.fullLabel.toUpperCase(), px, line1Y)
-  ctx.fillStyle = 'rgba(255,255,255,0.5)'
-  ctx.font = `${Math.floor(topH * 0.24)}px Arial`
-  ctx.fillText('INSPECCIÓN VEHICULAR · BELT SEGUROS', px, line2Y)
+  ctx.fillRect(0, 0, Math.max(5, Math.floor(W * 0.008)), topH)
 
-  // Bottom bar
-  const botH = Math.max(52, Math.floor(H * 0.09))
-  ctx.fillStyle = 'rgba(10,10,10,0.9)'
+  // Logo in top banner
+  if (logoImg.complete && logoImg.naturalWidth > 0) {
+    const logoH = Math.floor(topH * 0.7)
+    const logoW = Math.floor(logoH * (logoImg.naturalWidth / logoImg.naturalHeight))
+    ctx.drawImage(logoImg, px + Math.floor(W * 0.005), Math.floor((topH - logoH) / 2), logoW, logoH)
+  }
+
+  // Step label (right)
+  ctx.textAlign = 'right'
+  ctx.textBaseline = 'middle'
+  ctx.fillStyle = '#ffffff'
+  ctx.font = `bold ${Math.floor(topH * 0.38)}px Arial`
+  ctx.fillText(step.fullLabel.toUpperCase(), W - px, topH * 0.5)
+
+  // ─── 3. BOTTOM BANNER ───
+  const botH = Math.max(40, Math.floor(H * 0.045))
+  ctx.fillStyle = 'rgba(0,0,0,0.88)'
   ctx.fillRect(0, H - botH, W, botH)
   ctx.fillStyle = '#c9e100'
-  ctx.fillRect(0, H - botH, Math.max(4, Math.floor(W * 0.007)), botH)
+  ctx.fillRect(0, H - botH, Math.max(5, Math.floor(W * 0.008)), botH)
 
-  // Lightning bolt
-  const bx = Math.floor(W * 0.025)
-  const by = H - botH + Math.floor(botH * 0.1)
-  const bh = Math.floor(botH * 0.8)
-  const bw = Math.floor(bh * 0.55)
-  ctx.fillStyle = '#c9e100'
-  ctx.beginPath()
-  ctx.moveTo(bx + bw * 0.55, by)
-  ctx.lineTo(bx,              by + bh * 0.48)
-  ctx.lineTo(bx + bw * 0.38, by + bh * 0.48)
-  ctx.lineTo(bx + bw * 0.12, by + bh)
-  ctx.lineTo(bx + bw,        by + bh * 0.52)
-  ctx.lineTo(bx + bw * 0.62, by + bh * 0.52)
-  ctx.closePath()
-  ctx.fill()
-
-  const tx = bx + bw + Math.floor(W * 0.012)
-  ctx.fillStyle = '#ffffff'
-  ctx.font = `bold ${Math.floor(botH * 0.3)}px Arial`
   ctx.textAlign = 'left'
-  ctx.fillText('BELT Seguros', tx, H - botH + botH * 0.38)
-  ctx.fillStyle = '#9aa0a6'
-  ctx.font = `${Math.floor(botH * 0.22)}px Arial`
-  ctx.fillText('Productores de Seguros', tx, H - botH + botH * 0.7)
-
+  ctx.textBaseline = 'middle'
   ctx.fillStyle = '#c9e100'
-  ctx.font = `bold ${Math.floor(botH * 0.26)}px Arial`
+  ctx.font = `bold ${Math.floor(botH * 0.4)}px Arial`
+  ctx.fillText('INSPECCIÓN VEHICULAR', px, H - botH + botH * 0.5)
+
   ctx.textAlign = 'right'
-  ctx.fillText('INSPECCIÓN VEHICULAR', W - Math.floor(W * 0.025), H - botH + botH * 0.37)
-  ctx.fillStyle = '#9aa0a6'
-  ctx.font = `${Math.floor(botH * 0.2)}px Arial`
-  ctx.fillText(fmtShort(now), W - Math.floor(W * 0.025), H - botH + botH * 0.68)
+  ctx.fillStyle = 'rgba(255,255,255,0.5)'
+  ctx.font = `${Math.floor(botH * 0.3)}px Arial`
+  ctx.fillText(`v${APP_VERSION}`, W - px, H - botH + botH * 0.5)
 }
 
 // ── Main component ───────────────────────────────────────────────
@@ -171,6 +200,8 @@ export default function FotosVehiculo() {
   const [preview,   setPreview]   = useState(null)
   const [camReady,  setCamReady]  = useState(false)
   const [camError,  setCamError]  = useState(null)
+  const [flashOn,   setFlashOn]   = useState(false)
+  const [flashAvail, setFlashAvail] = useState(false)
   const [clock,     setClock]     = useState(new Date())
 
   // Form data
@@ -180,6 +211,8 @@ export default function FotosVehiculo() {
   const [uploadErr, setUploadErr] = useState(null)
   const [saved,     setSaved]     = useState(false)
   const [numGestion, setNumGestion] = useState(null)
+  const [geoCoords, setGeoCoords] = useState(null)
+  const [geoLocality, setGeoLocality] = useState(null)
 
   const STEPS = vehicleType === 'moto' ? STEPS_MOTO : STEPS_AUTO
   const step = STEPS[stepIdx] || STEPS[0]
@@ -194,6 +227,39 @@ export default function FotosVehiculo() {
     return () => clearInterval(id)
   }, [])
 
+  // Geolocation: get position + reverse geocode for locality
+  useEffect(() => {
+    if (!vehicleType) return
+    if (!navigator.geolocation) return
+    let geocoded = false
+    const watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude }
+        setGeoCoords(coords)
+        if (!geocoded) {
+          geocoded = true
+          fetch(`https://nominatim.openstreetmap.org/reverse?lat=${coords.lat}&lon=${coords.lng}&format=json&zoom=14`)
+            .then(r => r.json())
+            .then(data => {
+              const a = data.address || {}
+              const suburb = a.suburb || a.neighbourhood || a.city_district || ''
+              const city = a.city || a.town || a.municipality || ''
+              const state = a.state || ''
+              const country = a.country || ''
+              const parts = [suburb, city, state, country].filter(Boolean)
+              // Deduplicate (e.g. if city === state)
+              const unique = [...new Set(parts)]
+              setGeoLocality(unique.length > 0 ? unique.join(', ') : `${coords.lat.toFixed(4)}, ${coords.lng.toFixed(4)}`)
+            })
+            .catch(() => setGeoLocality(`${coords.lat.toFixed(4)}, ${coords.lng.toFixed(4)}`))
+        }
+      },
+      () => {},
+      { enableHighAccuracy: true, maximumAge: 10000 }
+    )
+    return () => navigator.geolocation.clearWatch(watchId)
+  }, [vehicleType])
+
   // Camera: start when vehicle type is selected (phase goes to camera)
   useEffect(() => {
     if (!vehicleType) return
@@ -206,7 +272,12 @@ export default function FotosVehiculo() {
       streamRef.current = stream
       if (videoRef.current) {
         videoRef.current.srcObject = stream
-        videoRef.current.onloadedmetadata = () => setCamReady(true)
+        videoRef.current.onloadedmetadata = () => {
+          setCamReady(true)
+          const track = stream.getVideoTracks()[0]
+          const caps = track.getCapabilities?.()
+          if (caps?.torch) setFlashAvail(true)
+        }
       }
     }).catch(() => {
       if (active) setCamError('No se pudo acceder a la cámara. Verificá los permisos del navegador.')
@@ -241,7 +312,12 @@ export default function FotosVehiculo() {
       streamRef.current = stream
       if (videoRef.current) {
         videoRef.current.srcObject = stream
-        videoRef.current.onloadedmetadata = () => setCamReady(true)
+        videoRef.current.onloadedmetadata = () => {
+          setCamReady(true)
+          const track = stream.getVideoTracks()[0]
+          const caps = track.getCapabilities?.()
+          if (caps?.torch) setFlashAvail(true)
+        }
       }
     }).catch(() => {
       if (active) setCamError('No se pudo acceder a la cámara. Verificá los permisos del navegador.')
@@ -266,7 +342,7 @@ export default function FotosVehiculo() {
     canvas.width  = video.videoWidth  || 1280
     canvas.height = video.videoHeight || 720
     canvas.getContext('2d').drawImage(video, 0, 0)
-    applyWatermark(canvas, currentStep)
+    applyWatermark(canvas, currentStep, geoCoords, geoLocality)
 
     canvas.toBlob((blob) => {
       if (!blob) return
@@ -275,7 +351,7 @@ export default function FotosVehiculo() {
       setPreview(previewUrl)
       setPhase('preview')
     }, 'image/jpeg', 0.93)
-  }, [camReady, stepIdx])
+  }, [camReady, stepIdx, geoCoords, geoLocality])
 
   const handleNext = () => {
     if (stepIdx < STEPS.length - 1) { setStepIdx(s => s + 1); setPhase('camera') }
@@ -295,11 +371,10 @@ export default function FotosVehiculo() {
     setUploadErr(null)
 
     const dniClean = dni.trim().replace(/\./g, '').replace(/\s/g, '')
-    const random = Math.floor(Math.random() * 9000 + 1000)
-    const gestion = `BELT-${dniClean}-${random}`
+    const gestion = generarNumeroGestion()
     const formData = new FormData()
     formData.append('dni', dniClean)
-    formData.append('patente', dniClean)
+    formData.append('patente', gestion)
     formData.append('tipo', vehicleType)
     formData.append('gestion', gestion)
     photos.forEach(p => formData.append('fotos', p.blob, `foto.jpg`))
@@ -367,6 +442,7 @@ export default function FotosVehiculo() {
     setPhotos([]); setPreview(null); setDni('');
     setUploadMsg(null); setUploadErr(null); setSaved(false);
     setCamReady(false); setCamError(null); setNumGestion(null);
+    setGeoCoords(null); setGeoLocality(null); setFlashOn(false); setFlashAvail(false);
   }
 
   // ── SELECT screen (Auto / Moto) ─────────────────────────────
@@ -374,9 +450,7 @@ export default function FotosVehiculo() {
     <div className="min-h-screen bg-belt-dark flex flex-col safe-top safe-bottom">
       <div className="flex-1 flex flex-col items-center justify-center px-6">
         <div className="mb-8 text-center">
-          <div className="w-16 h-16 bg-belt-yellow/15 rounded-2xl flex items-center justify-center mx-auto mb-4">
-            <Camera size={32} className="text-belt-yellow"/>
-          </div>
+          <img src={`/logo-belt.png?v=${APP_VERSION}`} alt="BELT Seguros" className="w-40 mx-auto mb-4"/>
           <h1 className="text-white font-black text-2xl mb-2">Inspección Vehicular</h1>
           <p className="text-gray-400 text-sm">Seleccioná el tipo de vehículo para comenzar</p>
         </div>
@@ -634,8 +708,23 @@ export default function FotosVehiculo() {
           <p className="text-white text-center font-bold text-base mb-1">{step.fullLabel}</p>
           <p className="text-gray-300 text-center text-sm mb-4">{step.instruction}</p>
 
-          {/* Shutter button */}
-          <div className="flex items-center justify-center">
+          {/* Shutter + Flash */}
+          <div className="flex items-center justify-center gap-6">
+            {/* Flash toggle */}
+            <button
+              onClick={() => {
+                const track = streamRef.current?.getVideoTracks()[0]
+                if (!track) return
+                const newState = !flashOn
+                track.applyConstraints({ advanced: [{ torch: newState }] })
+                  .then(() => setFlashOn(newState))
+                  .catch(() => {})
+              }}
+              disabled={!flashAvail}
+              className={`w-12 h-12 rounded-full flex items-center justify-center transition-all ${flashOn ? 'bg-belt-yellow text-belt-dark' : 'bg-white/15 text-white'} ${!flashAvail ? 'opacity-0 pointer-events-none' : ''}`}>
+              {flashOn ? <Zap size={20}/> : <ZapOff size={20}/>}
+            </button>
+            {/* Shutter */}
             <button onClick={handleCapture} disabled={!camReady}
               className="w-20 h-20 rounded-full border-4 border-white flex items-center justify-center transition-transform active:scale-90 disabled:opacity-40"
               style={{ WebkitTapHighlightColor: 'transparent' }}>
@@ -643,6 +732,8 @@ export default function FotosVehiculo() {
                 <Camera size={28} className="text-belt-dark"/>
               </div>
             </button>
+            {/* Spacer for centering */}
+            <div className={`w-12 h-12 ${!flashAvail ? 'opacity-0' : 'opacity-0'}`}/>
           </div>
         </div>
       </div>

@@ -17,9 +17,21 @@ const DB_BASE = process.env.DB_BASE || path.resolve(__dirname, 'database', 'imag
 app.use(cors())
 app.use(express.json())
 
-// Forzar no-cache en HTML para evitar problemas con Cloudflare cache
+// Security headers
 app.use((req, res, next) => {
-  if (req.path === '/' || req.path.endsWith('.html')) {
+  res.setHeader('X-Content-Type-Options', 'nosniff')
+  res.setHeader('X-Frame-Options', 'DENY')
+  res.setHeader('X-XSS-Protection', '1; mode=block')
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin')
+  next()
+})
+
+// Admin API key (set in environment, default blocks access)
+const ADMIN_KEY = process.env.ADMIN_KEY || ''
+
+// Forzar no-cache en HTML y PNGs para evitar problemas con Cloudflare/browser cache
+app.use((req, res, next) => {
+  if (req.path === '/' || req.path.endsWith('.html') || req.path.endsWith('.png')) {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate')
     res.setHeader('Content-Disposition', 'inline')
     res.setHeader('X-Content-Type-Options', 'nosniff')
@@ -80,12 +92,14 @@ app.post('/api/guardar-inspeccion', (req, res, next) => {
     ok: true,
     carpeta: folderName,
     fotos: saved,
-    ruta: destDir,
   })
 })
 
-// GET /api/inspecciones – list all inspection folders
+// GET /api/inspecciones – PROTECTED: requires admin key
 app.get('/api/inspecciones', (req, res) => {
+  if (!ADMIN_KEY || req.headers['x-admin-key'] !== ADMIN_KEY) {
+    return res.status(403).json({ error: 'Acceso denegado' })
+  }
   try {
     if (!fs.existsSync(DB_BASE)) {
       return res.json({ inspecciones: [] })
@@ -96,7 +110,6 @@ app.get('/api/inspecciones', (req, res) => {
         const dirPath = path.join(DB_BASE, d.name)
         const files = fs.readdirSync(dirPath).filter(f => f.endsWith('.jpg'))
         const stat = fs.statSync(dirPath)
-        // Read metadata if exists
         let tipo = 'auto'
         const metaPath = path.join(dirPath, 'meta.json')
         if (fs.existsSync(metaPath)) {
@@ -114,20 +127,33 @@ app.get('/api/inspecciones', (req, res) => {
     res.json({ inspecciones: dirs })
   } catch (err) {
     console.error('Error en /api/inspecciones:', err)
-    res.status(500).json({ error: err.message })
+    res.status(500).json({ error: 'Error interno' })
   }
 })
 
-// GET /api/imagen/:carpeta/:foto – serve a specific image
+// GET /api/imagen/:carpeta/:foto – PROTECTED + path traversal prevention
 app.get('/api/imagen/:carpeta/:foto', (req, res) => {
-  const filePath = path.join(DB_BASE, req.params.carpeta, req.params.foto)
+  if (!ADMIN_KEY || req.headers['x-admin-key'] !== ADMIN_KEY) {
+    return res.status(403).json({ error: 'Acceso denegado' })
+  }
+  // Sanitize: prevent path traversal
+  const carpeta = path.basename(req.params.carpeta)
+  const foto = path.basename(req.params.foto)
+  if (carpeta !== req.params.carpeta || foto !== req.params.foto) {
+    return res.status(400).json({ error: 'Parámetros inválidos' })
+  }
+  const filePath = path.join(DB_BASE, carpeta, foto)
+  // Ensure resolved path is within DB_BASE
+  if (!filePath.startsWith(path.resolve(DB_BASE))) {
+    return res.status(403).json({ error: 'Acceso denegado' })
+  }
   if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Imagen no encontrada' })
   res.sendFile(filePath)
 })
 
 // GET /api/health
 app.get('/api/health', (req, res) => {
-  res.json({ ok: true, dbPath: DB_BASE })
+  res.json({ ok: true, version: '1.3.0' })
 })
 
 // Página de diagnóstico para mobile
