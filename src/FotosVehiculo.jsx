@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
-import { ArrowLeft, Camera, RotateCcw, CheckCircle, Download, X, Save, Upload, Image, Car, Bike, MessageCircle, Zap, ZapOff } from 'lucide-react'
+import { ArrowLeft, Camera, RotateCcw, CheckCircle, Download, X, Save, Upload, Image, Car, Bike, MessageCircle, Zap, ZapOff, ImagePlus } from 'lucide-react'
 
-const APP_VERSION = '1.3.6'
+const APP_VERSION = '1.3.8'
 
 // Preload logo for watermark
 const logoImg = new window.Image()
@@ -20,8 +20,8 @@ function generarNumeroGestion() {
 const STEPS_AUTO = [
   // Sección A – Fotos del Auto
   { id: 'frente',       fullLabel: 'Frente (Patente Visible)',  instruction: 'Patente legible. Faros en cuadro.',                section: 'A', sectionLabel: 'Fotos del Auto',        view: 'front' },
-  { id: 'lateral-der',  fullLabel: 'Lateral Derecho',           instruction: 'Lateral completo visible. Puertas en cuadro.',     section: 'A', sectionLabel: 'Fotos del Auto',        view: 'side' },
-  { id: 'lateral-izq',  fullLabel: 'Lateral Izquierdo',         instruction: 'Lateral completo visible. Puertas en cuadro.',     section: 'A', sectionLabel: 'Fotos del Auto',        view: 'side-flip' },
+  { id: 'lateral-der',  fullLabel: 'Lateral Derecho',           instruction: 'Lateral completo visible. Puertas en cuadro.',     section: 'A', sectionLabel: 'Fotos del Auto',        view: 'side-flip' },
+  { id: 'lateral-izq',  fullLabel: 'Lateral Izquierdo',         instruction: 'Lateral completo visible. Puertas en cuadro.',     section: 'A', sectionLabel: 'Fotos del Auto',        view: 'side' },
   { id: 'trasera',      fullLabel: 'Trasera (Patente Visible)',  instruction: 'Patente legible. Luces traseras en cuadro.',      section: 'A', sectionLabel: 'Fotos del Auto',        view: 'rear' },
   // Sección B – Identificación y Datos
   { id: 'tablero',      fullLabel: 'Tablero',                   instruction: 'Foto con el tablero encendido.',                   section: 'B', sectionLabel: 'Identificación y Datos', view: 'tablero' },
@@ -36,8 +36,8 @@ const STEPS_AUTO = [
 const STEPS_MOTO = [
   // Sección A – Fotos de la Moto
   { id: 'frente',       fullLabel: 'Frente',                    instruction: 'Patente delantera legible. Faro en cuadro.',        section: 'A', sectionLabel: 'Fotos de la Moto',      view: 'moto-front' },
-  { id: 'perfil-der',   fullLabel: 'Perfil Derecho',            instruction: 'Lateral derecho completo. Ruedas en cuadro.',       section: 'A', sectionLabel: 'Fotos de la Moto',      view: 'moto-side' },
-  { id: 'perfil-izq',   fullLabel: 'Perfil Izquierdo',          instruction: 'Lateral izquierdo completo. Ruedas en cuadro.',     section: 'A', sectionLabel: 'Fotos de la Moto',      view: 'moto-side-flip' },
+  { id: 'perfil-der',   fullLabel: 'Perfil Derecho',            instruction: 'Lateral derecho completo. Ruedas en cuadro.',       section: 'A', sectionLabel: 'Fotos de la Moto',      view: 'moto-side-flip' },
+  { id: 'perfil-izq',   fullLabel: 'Perfil Izquierdo',          instruction: 'Lateral izquierdo completo. Ruedas en cuadro.',     section: 'A', sectionLabel: 'Fotos de la Moto',      view: 'moto-side' },
   { id: 'trasera',      fullLabel: 'Trasera',                   instruction: 'Patente trasera legible. Luces de posición en cuadro.', section: 'A', sectionLabel: 'Fotos de la Moto',  view: 'moto-rear' },
   // Sección B – Identificación y Datos
   { id: 'chasis',       fullLabel: 'N° de Chasis / VIN',        instruction: 'Foto nítida del número de chasis.',                section: 'B', sectionLabel: 'Identificación y Datos', view: 'chasis' },
@@ -191,6 +191,8 @@ function applyWatermark(canvas, step, geoCoords, locality) {
 export default function FotosVehiculo() {
   const videoRef  = useRef(null)
   const streamRef = useRef(null)
+  const fileInputRef = useRef(null)
+  const [retakeIdx, setRetakeIdx] = useState(null) // index of photo being retaken from form
 
   const [vehicleType, setVehicleType] = useState(null) // 'auto' | 'moto'
   const [stepIdx,   setStepIdx]   = useState(0)
@@ -364,6 +366,65 @@ export default function FotosVehiculo() {
     setPhase('camera')
   }
 
+  // Pick from gallery (for Cedula steps)
+  const isCedulaStep = step.id === 'cedula-f' || step.id === 'cedula-d'
+  const handleGalleryPick = () => {
+    if (fileInputRef.current) fileInputRef.current.click()
+  }
+  const handleFileSelected = (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const img = new window.Image()
+    img.onload = () => {
+      const canvas = document.createElement('canvas')
+      canvas.width = img.width
+      canvas.height = img.height
+      canvas.getContext('2d').drawImage(img, 0, 0)
+      const currentStep = STEPS[stepIdx]
+      applyWatermark(canvas, currentStep, geoCoords, geoLocality)
+      canvas.toBlob((blob) => {
+        if (!blob) return
+        const previewUrl = URL.createObjectURL(blob)
+        setPhotos(prev => [...prev, { url: previewUrl, label: currentStep.fullLabel, blob }])
+        setPreview(previewUrl)
+        setPhase('preview')
+      }, 'image/jpeg', 0.93)
+      URL.revokeObjectURL(img.src)
+    }
+    img.src = URL.createObjectURL(file)
+    e.target.value = '' // reset so same file can be selected again
+  }
+
+  // Retake a specific photo from the form/summary screen
+  const handleRetakeFromForm = (idx) => {
+    setRetakeIdx(idx)
+    setStepIdx(idx)
+    setPhase('camera')
+  }
+  // Override handleCapture behavior when retaking from form
+  const handleCaptureRetake = useCallback(() => {
+    const video = videoRef.current
+    if (!video || !camReady || retakeIdx === null) return
+    const targetStep = STEPS[retakeIdx]
+    const canvas = document.createElement('canvas')
+    canvas.width = video.videoWidth || 1280
+    canvas.height = video.videoHeight || 720
+    canvas.getContext('2d').drawImage(video, 0, 0)
+    applyWatermark(canvas, targetStep, geoCoords, geoLocality)
+
+    canvas.toBlob((blob) => {
+      if (!blob) return
+      const previewUrl = URL.createObjectURL(blob)
+      setPhotos(prev => {
+        const copy = [...prev]
+        copy[retakeIdx] = { url: previewUrl, label: targetStep.fullLabel, blob }
+        return copy
+      })
+      setRetakeIdx(null)
+      setPhase('form')
+    }, 'image/jpeg', 0.93)
+  }, [camReady, retakeIdx, geoCoords, geoLocality])
+
   // Upload photos to server
   const handleUpload = async () => {
     if (!dni.trim()) return
@@ -443,42 +504,40 @@ export default function FotosVehiculo() {
     setUploadMsg(null); setUploadErr(null); setSaved(false);
     setCamReady(false); setCamError(null); setNumGestion(null);
     setGeoCoords(null); setGeoLocality(null); setFlashOn(false); setFlashAvail(false);
+    setRetakeIdx(null);
   }
 
   // ── SELECT screen (Auto / Moto) ─────────────────────────────
   if (phase === 'select') return (
-    <div className="min-h-screen bg-belt-dark flex flex-col safe-top safe-bottom">
-      <div className="flex-1 flex flex-col items-center justify-center px-6">
-        <div className="mb-8 text-center">
-          <img src={`/logo-belt.png?v=${APP_VERSION}`} alt="BELT Seguros" className="w-40 mx-auto mb-4"/>
-          <h1 className="text-white font-black text-2xl mb-2">Inspección Vehicular</h1>
-          <p className="text-gray-400 text-sm">Seleccioná el tipo de vehículo para comenzar</p>
-        </div>
-        <div className="w-full max-w-xs space-y-4">
+    <div className="h-[100dvh] flex flex-col safe-top overflow-hidden" style={{ backgroundColor: '#141f20' }}>
+      <div className="flex-1 flex flex-col items-center justify-center px-5">
+        <video src="/logo-belt-animated.mp4" autoPlay muted playsInline className="w-72 mx-auto pointer-events-none"/>
+        <h1 className="text-white font-black text-3xl mt-1">Inspección Vehicular</h1>
+        <p className="text-gray-400 text-lg mt-1">Seleccioná el tipo de vehículo</p>
+        <div className="w-full max-w-sm space-y-3 mt-5">
           <button onClick={() => handleSelectVehicle('auto')}
-            className="w-full bg-white/10 border border-white/20 hover:border-belt-yellow hover:bg-belt-yellow/10 rounded-2xl p-6 flex items-center gap-5 transition-all active:scale-95 group">
-            <div className="w-16 h-16 bg-belt-yellow/15 group-hover:bg-belt-yellow/25 rounded-xl flex items-center justify-center transition-all">
+            className="w-full bg-white/10 border border-white/20 hover:border-belt-yellow hover:bg-belt-yellow/10 rounded-2xl px-5 py-4 flex items-center gap-4 transition-all active:scale-95 group">
+            <div className="w-14 h-14 bg-belt-yellow/15 group-hover:bg-belt-yellow/25 rounded-xl flex items-center justify-center transition-all flex-shrink-0">
               <Car size={32} className="text-belt-yellow"/>
             </div>
             <div className="text-left">
-              <p className="text-white font-black text-lg">Auto</p>
-              <p className="text-gray-400 text-xs">11 fotos: vehículo, documentos y estado</p>
+              <p className="text-white font-black text-2xl">Auto</p>
+              <p className="text-gray-400 text-sm">9 fotos · vehículo y documentos</p>
             </div>
           </button>
           <button onClick={() => handleSelectVehicle('moto')}
-            className="w-full bg-white/10 border border-white/20 hover:border-belt-yellow hover:bg-belt-yellow/10 rounded-2xl p-6 flex items-center gap-5 transition-all active:scale-95 group">
-            <div className="w-16 h-16 bg-belt-yellow/15 group-hover:bg-belt-yellow/25 rounded-xl flex items-center justify-center transition-all">
+            className="w-full bg-white/10 border border-white/20 hover:border-belt-yellow hover:bg-belt-yellow/10 rounded-2xl px-5 py-4 flex items-center gap-4 transition-all active:scale-95 group">
+            <div className="w-14 h-14 bg-belt-yellow/15 group-hover:bg-belt-yellow/25 rounded-xl flex items-center justify-center transition-all flex-shrink-0">
               <Bike size={32} className="text-belt-yellow"/>
             </div>
             <div className="text-left">
-              <p className="text-white font-black text-lg">Moto</p>
-              <p className="text-gray-400 text-xs">11 fotos: moto, documentos e identificación</p>
+              <p className="text-white font-black text-2xl">Moto</p>
+              <p className="text-gray-400 text-sm">9 fotos · moto y documentos</p>
             </div>
           </button>
         </div>
-        <p className="text-gray-600 text-[10px] mt-8 text-center uppercase tracking-widest font-bold">BELT Seguros · Inspección Digital</p>
       </div>
-      <p className="fixed bottom-3 right-3 text-gray-600 text-[10px] font-mono">v{APP_VERSION}</p>
+      <p className="text-center text-gray-600 text-xs pb-3 font-bold uppercase tracking-widest">BELT Seguros · v{APP_VERSION}</p>
     </div>
   )
 
@@ -486,12 +545,12 @@ export default function FotosVehiculo() {
   if (phase === 'complete') return (
     <div className="min-h-screen bg-belt-dark flex flex-col safe-top safe-bottom">
       <div className="flex items-center gap-3 px-4 py-4 border-b border-white/10">
-        <div className="w-8 h-8 bg-green-500/20 rounded-full flex items-center justify-center flex-shrink-0">
-          <CheckCircle size={18} className="text-green-400"/>
+        <div className="w-10 h-10 bg-green-500/20 rounded-full flex items-center justify-center flex-shrink-0">
+          <CheckCircle size={22} className="text-green-400"/>
         </div>
         <div>
-          <p className="text-white font-black">¡Inspección completa!</p>
-          <p className="text-gray-400 text-xs">{photos.length} fotos guardadas en el servidor</p>
+          <p className="text-white font-black text-lg">¡Inspección completa!</p>
+          <p className="text-gray-400 text-sm">{photos.length} fotos guardadas en el servidor</p>
         </div>
       </div>
       <div className="flex-1 overflow-y-auto px-4 py-6">
@@ -543,53 +602,57 @@ export default function FotosVehiculo() {
   if (phase === 'form') return (
     <div className="min-h-screen bg-belt-dark flex flex-col safe-top safe-bottom">
       <div className="flex items-center gap-3 px-4 py-4 border-b border-white/10">
-        <div className="w-8 h-8 bg-belt-yellow/20 rounded-full flex items-center justify-center flex-shrink-0">
-          <Camera size={18} className="text-belt-yellow"/>
+        <div className="w-10 h-10 bg-belt-yellow/20 rounded-full flex items-center justify-center flex-shrink-0">
+          <Camera size={20} className="text-belt-yellow"/>
         </div>
         <div>
-          <p className="text-white font-black">{photos.length} fotos tomadas</p>
-          <p className="text-gray-400 text-xs">Completá los datos para guardar</p>
+          <p className="text-white font-black text-lg">{photos.length} fotos tomadas</p>
+          <p className="text-gray-400 text-sm">Tocá una foto para volver a tomarla</p>
         </div>
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 py-6">
-        {/* Photo thumbnails */}
-        <div className="grid grid-cols-4 gap-2 mb-6">
+        {/* Photo thumbnails – clickable for retake */}
+        <div className="grid grid-cols-3 gap-2 mb-6">
           {photos.map((p, i) => (
-            <div key={i} className="relative rounded-lg overflow-hidden aspect-video bg-gray-800">
+            <button key={i} onClick={() => handleRetakeFromForm(i)}
+              className="relative rounded-lg overflow-hidden aspect-video bg-gray-800 group">
               <img src={p.url} alt={p.label} className="w-full h-full object-cover"/>
-              <div className="absolute bottom-0 inset-x-0 bg-black/70 text-center">
-                <p className="text-white text-[9px] font-bold py-0.5">{i + 1}</p>
+              <div className="absolute inset-0 bg-black/0 group-active:bg-black/50 flex items-center justify-center transition-all">
+                <RotateCcw size={20} className="text-white opacity-0 group-active:opacity-100 transition-all"/>
               </div>
-            </div>
+              <div className="absolute bottom-0 inset-x-0 bg-black/70 text-center">
+                <p className="text-white text-[10px] font-bold py-0.5">{i + 1}. {STEPS[i]?.fullLabel?.split(' ')[0]}</p>
+              </div>
+            </button>
           ))}
         </div>
 
         {/* Form */}
         <div className="space-y-4 mb-6">
           <div>
-            <label className="text-gray-400 text-xs font-bold uppercase tracking-wide mb-1.5 block">DNI del titular</label>
+            <label className="text-gray-400 text-sm font-bold uppercase tracking-wide mb-1.5 block">DNI del titular</label>
             <input
               type="text"
               inputMode="numeric"
               placeholder="Ej: 35.123.456"
               value={dni}
               onChange={e => setDni(e.target.value)}
-              className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3.5 text-white text-lg font-bold placeholder-gray-500 focus:outline-none focus:border-belt-yellow focus:ring-1 focus:ring-belt-yellow transition-all"
+              className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-4 text-white text-xl font-bold placeholder-gray-500 focus:outline-none focus:border-belt-yellow focus:ring-1 focus:ring-belt-yellow transition-all"
             />
           </div>
         </div>
 
         {uploadErr && (
           <div className="bg-red-900/30 border border-red-500/30 rounded-xl p-3 mb-4">
-            <p className="text-red-400 text-sm">{uploadErr}</p>
+            <p className="text-red-400 text-base">{uploadErr}</p>
           </div>
         )}
 
         <button
           onClick={handleUpload}
           disabled={!dni.trim() || uploading}
-          className="w-full btn-primary flex items-center justify-center gap-2 py-4 text-base disabled:opacity-40 disabled:cursor-not-allowed"
+          className="w-full btn-primary flex items-center justify-center gap-2 py-4 text-lg disabled:opacity-40 disabled:cursor-not-allowed"
         >
           {uploading ? (
             <>
@@ -598,14 +661,14 @@ export default function FotosVehiculo() {
             </>
           ) : (
             <>
-              <Upload size={18}/> Guardar inspección
+              <Upload size={20}/> Guardar inspección
             </>
           )}
         </button>
 
         <button onClick={() => { setPhase('camera'); setStepIdx(0); setPhotos([]) }}
-          className="w-full flex items-center justify-center gap-2 text-gray-400 text-sm mt-4 py-2">
-          <RotateCcw size={14}/> Volver a tomar fotos
+          className="w-full flex items-center justify-center gap-2 text-gray-400 text-base mt-4 py-2">
+          <RotateCcw size={16}/> Volver a tomar todas las fotos
         </button>
       </div>
     </div>
@@ -615,26 +678,26 @@ export default function FotosVehiculo() {
   if (phase === 'preview') return (
     <div className="fixed inset-0 bg-black flex flex-col" style={{ touchAction: 'none' }}>
       <div className="flex-shrink-0 flex items-center justify-between px-4 py-3 bg-belt-dark safe-top">
-        <p className="text-white font-black text-sm">{step.fullLabel}</p>
-        <span className="text-belt-yellow text-xs font-bold bg-white/10 px-2.5 py-1 rounded-full">{stepIdx + 1} / {STEPS.length}</span>
+        <p className="text-white font-black text-base">{step.fullLabel}</p>
+        <span className="text-belt-yellow text-sm font-bold bg-white/10 px-3 py-1 rounded-full">{stepIdx + 1} / {STEPS.length}</span>
       </div>
       <div className="flex-1 min-h-0 flex items-center justify-center bg-black overflow-hidden">
         {preview && <img src={preview} alt="preview" className="w-full h-full object-contain"/>}
       </div>
       <div className="flex-shrink-0 bg-belt-dark px-4 py-4 space-y-3 safe-bottom">
         {stepIdx < STEPS.length - 1 && (
-          <p className="text-center text-xs text-gray-400">
+          <p className="text-center text-sm text-gray-400">
             Siguiente: <span className="text-white font-semibold">{STEPS[stepIdx + 1].fullLabel}</span>
           </p>
         )}
         <div className="flex gap-3">
           <button onClick={handleRetake}
-            className="flex-1 flex items-center justify-center gap-2 bg-white/10 active:bg-white/20 text-white font-bold py-4 rounded-xl transition-all">
-            <RotateCcw size={16}/> Repetir
+            className="flex-1 flex items-center justify-center gap-2 bg-white/10 active:bg-white/20 text-white font-bold py-4 rounded-xl text-base transition-all">
+            <RotateCcw size={18}/> Repetir
           </button>
           <button onClick={handleNext}
-            className="flex-1 flex items-center justify-center gap-2 btn-primary py-4">
-            {stepIdx < STEPS.length - 1 ? <><Camera size={16}/> Siguiente</> : <><Save size={16}/> Guardar</>}
+            className="flex-1 flex items-center justify-center gap-2 btn-primary py-4 text-base">
+            {stepIdx < STEPS.length - 1 ? <><Camera size={18}/> Siguiente</> : <><Save size={18}/> Guardar</>}
           </button>
         </div>
       </div>
@@ -658,12 +721,12 @@ export default function FotosVehiculo() {
             <X size={18}/>
           </button>
           <div className="text-center">
-            <p className="text-white font-black text-xl leading-none tabular-nums">
+            <p className="text-white font-black text-2xl leading-none tabular-nums">
               {clock.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
             </p>
-            <p className="text-gray-300 text-[11px] font-medium mt-0.5">{fmtLong(clock)}</p>
+            <p className="text-gray-300 text-sm font-medium mt-0.5">{fmtLong(clock)}</p>
           </div>
-          <div className="bg-belt-yellow text-belt-dark font-black text-xs px-3 py-1.5 rounded-full">
+          <div className="bg-belt-yellow text-belt-dark font-black text-sm px-3 py-1.5 rounded-full">
             {stepIdx + 1}/{STEPS.length}
           </div>
         </div>
@@ -703,12 +766,12 @@ export default function FotosVehiculo() {
             <div className="flex-1 bg-white/10 rounded-full h-2.5">
               <div className="bg-belt-yellow h-2.5 rounded-full transition-all duration-500" style={{ width: `${((stepIdx + 1) / STEPS.length) * 100}%` }}/>
             </div>
-            <span className="text-belt-yellow text-xs font-bold tabular-nums w-10 text-right">{Math.round(((stepIdx + 1) / STEPS.length) * 100)}%</span>
+            <span className="text-belt-yellow text-sm font-bold tabular-nums w-12 text-right">{Math.round(((stepIdx + 1) / STEPS.length) * 100)}%</span>
           </div>
-          <p className="text-white text-center font-bold text-base mb-1">{step.fullLabel}</p>
-          <p className="text-gray-300 text-center text-sm mb-4">{step.instruction}</p>
+          <p className="text-white text-center font-bold text-2xl mb-1">{step.fullLabel}</p>
+          <p className="text-gray-300 text-center text-lg mb-4">{step.instruction}</p>
 
-          {/* Shutter + Flash */}
+          {/* Shutter + Flash + Gallery */}
           <div className="flex items-center justify-center gap-6">
             {/* Flash toggle */}
             <button
@@ -725,18 +788,38 @@ export default function FotosVehiculo() {
               {flashOn ? <Zap size={20}/> : <ZapOff size={20}/>}
             </button>
             {/* Shutter */}
-            <button onClick={handleCapture} disabled={!camReady}
+            <button onClick={retakeIdx !== null ? handleCaptureRetake : handleCapture} disabled={!camReady}
               className="w-20 h-20 rounded-full border-4 border-white flex items-center justify-center transition-transform active:scale-90 disabled:opacity-40"
               style={{ WebkitTapHighlightColor: 'transparent' }}>
               <div className="w-14 h-14 bg-belt-yellow rounded-full flex items-center justify-center shadow-lg">
                 <Camera size={28} className="text-belt-dark"/>
               </div>
             </button>
-            {/* Spacer for centering */}
-            <div className={`w-12 h-12 ${!flashAvail ? 'opacity-0' : 'opacity-0'}`}/>
+            {/* Gallery button (only for Cedula steps) or spacer */}
+            {isCedulaStep && retakeIdx === null ? (
+              <button onClick={handleGalleryPick}
+                className="w-12 h-12 rounded-full bg-white/15 flex items-center justify-center text-white active:bg-white/30 transition-all">
+                <ImagePlus size={20}/>
+              </button>
+            ) : retakeIdx !== null ? (
+              <button onClick={() => { setRetakeIdx(null); setPhase('form') }}
+                className="w-12 h-12 rounded-full bg-white/15 flex items-center justify-center text-white active:bg-white/30 transition-all">
+                <X size={20}/>
+              </button>
+            ) : (
+              <div className={`w-12 h-12 ${!flashAvail ? 'opacity-0' : 'opacity-0'}`}/>
+            )}
           </div>
+
+          {/* Retake indicator */}
+          {retakeIdx !== null && (
+            <p className="text-center text-belt-yellow text-sm font-bold mt-3">Retomando: {STEPS[retakeIdx]?.fullLabel}</p>
+          )}
         </div>
       </div>
+
+      {/* Hidden file input for gallery pick */}
+      <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileSelected}/>
     </div>
   )
 }

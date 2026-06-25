@@ -6,13 +6,14 @@
   * {
     -webkit-tap-highlight-color: transparent;
   }
-  body {
+  html, body, #root {
     font-family: 'Montserrat', system-ui, sans-serif;
-    background-color: #0a0a0a;
+    background-color: #000000;
     color: #ffffff;
-    min-height: 100vh;
+    height: 100%;
     -webkit-font-smoothing: antialiased;
     margin: 0;
+    overscroll-behavior: none;
   }
 }
 

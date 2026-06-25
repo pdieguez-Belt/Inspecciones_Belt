@@ -9,8 +9,8 @@ export default {
       colors: {
         belt: {
           yellow: '#c9e100',
-          black: '#0a0a0a',
-          dark: '#111111',
+          black: '#000000',
+          dark: '#000000',
         }
       },
       fontFamily: {

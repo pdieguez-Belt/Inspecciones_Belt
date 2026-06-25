@@ -4,6 +4,7 @@ import cors from 'cors'
 import path from 'path'
 import fs from 'fs'
 import { fileURLToPath } from 'url'
+import nodemailer from 'nodemailer'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const app = express()
@@ -28,6 +29,53 @@ app.use((req, res, next) => {
 
 // Admin API key (set in environment, default blocks access)
 const ADMIN_KEY = process.env.ADMIN_KEY || ''
+
+// Email notification config (set SMTP_* environment variables)
+const SMTP_HOST = process.env.SMTP_HOST || 'smtp.gmail.com'
+const SMTP_PORT = parseInt(process.env.SMTP_PORT || '587')
+const SMTP_USER = process.env.SMTP_USER || ''
+const SMTP_PASS = process.env.SMTP_PASS || ''
+const NOTIFY_EMAIL = process.env.NOTIFY_EMAIL || 'emision@beltseguros.com'
+
+const transporter = SMTP_USER ? nodemailer.createTransport({
+  host: SMTP_HOST,
+  port: SMTP_PORT,
+  secure: SMTP_PORT === 465,
+  auth: { user: SMTP_USER, pass: SMTP_PASS },
+}) : null
+
+async function sendNotificationEmail({ dni, gestion, tipo, fotos, fecha, carpeta }) {
+  if (!transporter) {
+    console.log('⚠️  Email no configurado (falta SMTP_USER/SMTP_PASS). Saltando notificación.')
+    return
+  }
+  try {
+    await transporter.sendMail({
+      from: `"BELT Inspecciones" <${SMTP_USER}>`,
+      to: NOTIFY_EMAIL,
+      subject: `Nueva Inspección Vehicular - DNI ${dni}`,
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;">
+          <h2 style="color:#1a1a1a;border-bottom:3px solid #c9e100;padding-bottom:10px;">
+            Nueva Inspección Vehicular
+          </h2>
+          <table style="width:100%;border-collapse:collapse;margin:20px 0;">
+            <tr><td style="padding:8px;font-weight:bold;color:#666;">N° Gestión:</td><td style="padding:8px;font-weight:bold;">${gestion}</td></tr>
+            <tr style="background:#f9f9f9;"><td style="padding:8px;font-weight:bold;color:#666;">DNI:</td><td style="padding:8px;">${dni}</td></tr>
+            <tr><td style="padding:8px;font-weight:bold;color:#666;">Tipo:</td><td style="padding:8px;">${tipo === 'moto' ? 'Moto' : 'Auto'}</td></tr>
+            <tr style="background:#f9f9f9;"><td style="padding:8px;font-weight:bold;color:#666;">Fotos:</td><td style="padding:8px;">${fotos} archivos</td></tr>
+            <tr><td style="padding:8px;font-weight:bold;color:#666;">Fecha:</td><td style="padding:8px;">${fecha}</td></tr>
+            <tr style="background:#f9f9f9;"><td style="padding:8px;font-weight:bold;color:#666;">Carpeta:</td><td style="padding:8px;font-family:monospace;">${carpeta}</td></tr>
+          </table>
+          <p style="color:#888;font-size:12px;margin-top:20px;">Este es un mensaje automático del sistema de inspecciones BELT Fotos.</p>
+        </div>
+      `,
+    })
+    console.log(`✉️  Email enviado a ${NOTIFY_EMAIL}`)
+  } catch (err) {
+    console.error('❌ Error enviando email:', err.message)
+  }
+}
 
 // Forzar no-cache en HTML y PNGs para evitar problemas con Cloudflare/browser cache
 app.use((req, res, next) => {
@@ -87,11 +135,24 @@ app.post('/api/guardar-inspeccion', (req, res, next) => {
     saved.push(filename)
   })
 
+  const gestion = req.body.gestion || folderName
+  const fecha = new Date().toLocaleString('es-AR', { dateStyle: 'long', timeStyle: 'short' })
+
   console.log(`✓ Inspección guardada: ${folderName}/ (${saved.length} fotos)`)
   res.json({
     ok: true,
     carpeta: folderName,
     fotos: saved,
+  })
+
+  // Send email notification (async, don't block response)
+  sendNotificationEmail({
+    dni: dniClean,
+    gestion,
+    tipo: tipo || 'auto',
+    fotos: saved.length,
+    fecha,
+    carpeta: folderName,
   })
 })
 
