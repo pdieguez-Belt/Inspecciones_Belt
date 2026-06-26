@@ -5,6 +5,7 @@ import path from 'path'
 import fs from 'fs'
 import { fileURLToPath } from 'url'
 import nodemailer from 'nodemailer'
+import { GoogleGenerativeAI } from '@google/generative-ai'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const app = express()
@@ -90,6 +91,58 @@ app.use((req, res, next) => {
 // Servir archivos estáticos del build de producción
 const distPath = path.join(__dirname, 'dist')
 app.use(express.static(distPath))
+
+// ── Gemini AI pre-capture validation ─────────────────────────
+const GEMINI_KEY = process.env.GEMINI_KEY || ''
+const genAI = GEMINI_KEY ? new GoogleGenerativeAI(GEMINI_KEY) : null
+
+const FRAME_PROMPTS = {
+  'frente':       'Se pide: FRENTE del vehículo (capó, faros, patente delantera). ¿Esta imagen muestra el frente?',
+  'lateral-der':  'Se pide: LATERAL DERECHO del vehículo (lado acompañante, perfil completo de costado). ¿Esta imagen muestra el lateral derecho?',
+  'lateral-izq':  'Se pide: LATERAL IZQUIERDO del vehículo (lado conductor, perfil completo de costado). ¿Esta imagen muestra el lateral izquierdo?',
+  'trasera':      'Se pide: PARTE TRASERA del vehículo (baúl, luces traseras, patente). ¿Esta imagen muestra la trasera?',
+  'perfil-der':   'Se pide: PERFIL DERECHO de una moto (lado derecho completo). ¿Esta imagen muestra el perfil derecho de una moto?',
+  'perfil-izq':   'Se pide: PERFIL IZQUIERDO de una moto (lado izquierdo completo). ¿Esta imagen muestra el perfil izquierdo de una moto?',
+}
+
+const FRAME_SYSTEM = `Sos un validador de encuadre vehicular. Analizás frames de cámara en tiempo real.
+Respondé SOLO con JSON: {"ok": true/false}
+Reglas:
+- "ok": true si la imagen muestra claramente el ángulo/lado que se pide
+- "ok": false si muestra otro ángulo (ej: frente cuando se pide lateral), otro lado, o no se ve un vehículo claro
+- Sé rápido y preciso. No agregues nada más que el JSON.`
+
+const frameSingle = multer({ storage: multer.memoryStorage(), limits: { fileSize: 500 * 1024 } }).single('frame')
+
+app.post('/api/validar-frame', (req, res, next) => {
+  frameSingle(req, res, (err) => {
+    if (err) return res.status(400).json({ ok: false })
+    next()
+  })
+}, async (req, res) => {
+  if (!genAI || !req.file) return res.json({ ok: true, skip: true })
+  const stepId = req.body.stepId || 'frente'
+  const prompt = FRAME_PROMPTS[stepId] || FRAME_PROMPTS['frente']
+
+  try {
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-lite', systemInstruction: FRAME_SYSTEM })
+    const imageData = req.file.buffer.toString('base64')
+    const result = await model.generateContent([
+      prompt,
+      { inlineData: { mimeType: 'image/jpeg', data: imageData } }
+    ])
+    const text = result.response.text().trim()
+    const jsonMatch = text.match(/\{[^}]+\}/)
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0])
+      return res.json({ ok: !!parsed.ok })
+    }
+    res.json({ ok: true, skip: true })
+  } catch (err) {
+    console.error('⚡ Frame validation error:', err.message?.slice(0, 80))
+    res.json({ ok: true, skip: true })
+  }
+})
 
 // Multer: almacena temporalmente en memoria
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024, files: 15 } })
@@ -258,7 +311,21 @@ if(navigator.connection) l('8. Connection: ' + navigator.connection.effectiveTyp
 </body></html>`)
 })
 
-// SPA fallback: cualquier ruta no-API devuelve index.html
+// SPA fallback: /1-4-0/* → beta version
+app.use('/1-4-0', (req, res, next) => {
+  if (req.path.startsWith('/api')) return next()
+  // If the file exists in dist/1-4-0, serve it (handled by express.static above)
+  const filePath = path.join(distPath, '1-4-0', req.path)
+  if (req.path !== '/' && fs.existsSync(filePath)) return next()
+  const betaIndex = path.join(distPath, '1-4-0', 'index.html')
+  if (fs.existsSync(betaIndex)) {
+    res.sendFile(betaIndex)
+  } else {
+    res.status(503).send('v1.4.0 no compilada')
+  }
+})
+
+// SPA fallback: cualquier ruta no-API devuelve index.html (versión estable)
 app.use((req, res, next) => {
   if (req.path.startsWith('/api')) return next()
   const indexPath = path.join(distPath, 'index.html')

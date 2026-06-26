@@ -1,7 +1,8 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { ArrowLeft, Camera, RotateCcw, CheckCircle, Download, X, Save, Upload, Image, Car, Bike, MessageCircle, Zap, ZapOff, ImagePlus } from 'lucide-react'
+import { analyzeFrameFull, resetGeminiCache, DETECTABLE_STEPS } from './frameAnalyzer'
 
-const APP_VERSION = '1.3.8'
+const APP_VERSION = '1.4.0'
 
 // Preload logo for watermark
 const logoImg = new window.Image()
@@ -78,7 +79,7 @@ const VIEW_TO_IMG = {
   'motor':           '/img/motor.png',
 }
 
-function VehicleSilhouette({ view }) {
+function VehicleSilhouette({ view, detected }) {
   const flip = view === 'side-flip' || view === 'moto-side-flip'
   const src = VIEW_TO_IMG[view]
   if (!src) return null
@@ -86,11 +87,13 @@ function VehicleSilhouette({ view }) {
     <img
       src={src}
       alt={view}
-      className="w-full h-full object-contain"
+      className="w-full h-full object-contain transition-all duration-700"
       style={{
-        opacity: 0.4,
+        opacity: detected ? 0.7 : 0.4,
         transform: flip ? 'scaleX(-1)' : undefined,
-        filter: 'invert(1)',
+        filter: detected
+          ? 'invert(1) sepia(1) saturate(5) hue-rotate(80deg) brightness(1.2)'
+          : 'invert(1)',
       }}
       draggable={false}
     />
@@ -193,6 +196,8 @@ export default function FotosVehiculo() {
   const streamRef = useRef(null)
   const fileInputRef = useRef(null)
   const [retakeIdx, setRetakeIdx] = useState(null) // index of photo being retaken from form
+  const [detected, setDetected] = useState(false)
+  const [debugInfo, setDebugInfo] = useState('')
 
   const [vehicleType, setVehicleType] = useState(null) // 'auto' | 'moto'
   const [stepIdx,   setStepIdx]   = useState(0)
@@ -334,6 +339,30 @@ export default function FotosVehiculo() {
       streamRef.current = null
     }
   }, [phase])
+
+  // Real-time frame analysis for vehicle detection
+  useEffect(() => {
+    if (phase !== 'camera' || !camReady) { setDetected(false); return }
+    if (!DETECTABLE_STEPS.includes(step.id)) { setDetected(false); return }
+
+    let active = true
+    let timerId = null
+
+    resetGeminiCache()
+    const loop = async () => {
+      if (!active || !videoRef.current) return
+      try {
+        const result = await analyzeFrameFull(videoRef.current, step.id)
+        if (active) setDetected(result.match)
+        if (active) setDebugInfo(`${result.reason} (c:${result.confidence.toFixed(2)})`)
+      } catch (e) { /* skip frame */ }
+      if (active) timerId = setTimeout(loop, 500)
+    }
+    // Small delay to let camera settle
+    timerId = setTimeout(loop, 1000)
+
+    return () => { active = false; if (timerId) clearTimeout(timerId) }
+  }, [phase, camReady, step.id])
 
   // Capture photo – NO auto-download, just store in memory
   const handleCapture = useCallback(() => {
@@ -504,7 +533,7 @@ export default function FotosVehiculo() {
     setUploadMsg(null); setUploadErr(null); setSaved(false);
     setCamReady(false); setCamError(null); setNumGestion(null);
     setGeoCoords(null); setGeoLocality(null); setFlashOn(false); setFlashAvail(false);
-    setRetakeIdx(null);
+    setRetakeIdx(null); setDetected(false);
   }
 
   // ── SELECT screen (Auto / Moto) ─────────────────────────────
@@ -735,8 +764,9 @@ export default function FotosVehiculo() {
       {/* Guide overlay – maximized to fill screen */}
       <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none"
         style={{ top: '70px', bottom: '150px', left: '8px', right: '8px' }}>
-        <VehicleSilhouette view={step.view}/>
+        <VehicleSilhouette view={step.view} detected={detected}/>
       </div>
+
 
       {/* Loading / error */}
       {!camReady && !camError && (
