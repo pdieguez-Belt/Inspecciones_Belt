@@ -465,7 +465,7 @@ export default function FotosVehiculo() {
     // Try sharing all files at once
     if (navigator.share && navigator.canShare?.({ files })) {
       try { await navigator.share({ files, title: 'BELT – Inspección Vehicular' }) }
-      catch { /* user cancelled */ }
+      catch (e) { /* user cancelled */ }
     } else {
       // Fallback: download each file
       for (const file of files) {
@@ -509,7 +509,7 @@ export default function FotosVehiculo() {
 
   // ── SELECT screen (Auto / Moto) ─────────────────────────────
   if (phase === 'select') return (
-    <div className="h-[100dvh] flex flex-col safe-top overflow-hidden" style={{ backgroundColor: '#141f20' }}>
+    <div className="h-[100dvh] bg-black flex flex-col safe-top overflow-hidden">
       <div className="flex-1 flex flex-col items-center justify-center px-5">
         <video src="/logo-belt-animated.mp4" autoPlay muted playsInline className="w-72 mx-auto pointer-events-none"/>
         <h1 className="text-white font-black text-3xl mt-1">Inspección Vehicular</h1>
