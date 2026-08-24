@@ -6,6 +6,7 @@ import fs from 'fs'
 import { fileURLToPath } from 'url'
 import nodemailer from 'nodemailer'
 import { GoogleGenerativeAI } from '@google/generative-ai'
+import Database from 'better-sqlite3'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const app = express()
@@ -15,6 +16,106 @@ const PORT = 3003
 // LOCAL: carpeta relativa para desarrollo
 // SERVIDOR: D:/Fotos - Asegurados
 const DB_BASE = process.env.DB_BASE || path.resolve(__dirname, 'database', 'imagenes', 'vehiculos_asegurados')
+
+// ── Base SQLite de datos de vehículos (dentro de la carpeta de inspecciones) ──
+// Se consulta desde el CRM. Se inicializa de forma resiliente: si falla, la app
+// sigue funcionando igual (solo se pierde el guardado de datos de cédula).
+let sqlDb = null
+try {
+  fs.mkdirSync(DB_BASE, { recursive: true })
+  sqlDb = new Database(path.join(DB_BASE, 'inspecciones.db'))
+  sqlDb.pragma('journal_mode = WAL')
+  sqlDb.exec(`
+    CREATE TABLE IF NOT EXISTS vehiculos (
+      dni         TEXT NOT NULL,
+      carpeta     TEXT NOT NULL,
+      tipo        TEXT,
+      dominio     TEXT,
+      marca       TEXT,
+      modelo      TEXT,
+      chasis      TEXT,
+      motor       TEXT,
+      cuadro      TEXT,
+      actualizado TEXT,
+      PRIMARY KEY (dni, carpeta)
+    );
+  `)
+  console.log(`🗄️  SQLite lista: ${path.join(DB_BASE, 'inspecciones.db')}`)
+} catch (err) {
+  console.error('⚠️  No se pudo inicializar SQLite (se deshabilita guardado de datos):', err.message)
+  sqlDb = null
+}
+
+function upsertVehiculo({ dni, carpeta, tipo, data }) {
+  if (!sqlDb) return
+  try {
+    sqlDb.prepare(`
+      INSERT INTO vehiculos (dni, carpeta, tipo, dominio, marca, modelo, chasis, motor, cuadro, actualizado)
+      VALUES (@dni, @carpeta, @tipo, @dominio, @marca, @modelo, @chasis, @motor, @cuadro, @actualizado)
+      ON CONFLICT(dni, carpeta) DO UPDATE SET
+        tipo        = COALESCE(NULLIF(excluded.tipo, ''), vehiculos.tipo),
+        dominio     = COALESCE(NULLIF(excluded.dominio, ''), vehiculos.dominio),
+        marca       = COALESCE(NULLIF(excluded.marca, ''), vehiculos.marca),
+        modelo      = COALESCE(NULLIF(excluded.modelo, ''), vehiculos.modelo),
+        chasis      = COALESCE(NULLIF(excluded.chasis, ''), vehiculos.chasis),
+        motor       = COALESCE(NULLIF(excluded.motor, ''), vehiculos.motor),
+        cuadro      = COALESCE(NULLIF(excluded.cuadro, ''), vehiculos.cuadro),
+        actualizado = excluded.actualizado
+    `).run({
+      dni,
+      carpeta,
+      tipo: tipo || '',
+      dominio: data.dominio || '',
+      marca: data.marca || '',
+      modelo: data.modelo || '',
+      chasis: data.chasis || '',
+      motor: data.motor || '',
+      cuadro: data.cuadro || '',
+      actualizado: new Date().toISOString(),
+    })
+    console.log(`🗄️  Datos de vehículo guardados: ${dni} / ${carpeta}`)
+  } catch (err) {
+    console.error('❌ Error guardando en SQLite:', err.message)
+  }
+}
+
+// Escribe un bloc de notas (datos.txt) con los datos de la cédula dentro de la carpeta
+function writeDatosTxt({ dni, carpeta, tipo, data }) {
+  try {
+    const destDir = path.join(DB_BASE, path.basename(carpeta))
+    if (!fs.existsSync(destDir)) return
+    const dash = (v) => (v && v.trim() ? v.trim() : '-')
+    const fecha = new Date().toLocaleString('es-AR', { dateStyle: 'long', timeStyle: 'short' })
+    const contenido =
+`==========================================
+   BELT SEGUROS - DATOS DEL VEHICULO
+==========================================
+DNI:            ${dash(dni)}
+Carpeta:        ${dash(carpeta)}
+Tipo:           ${tipo === 'moto' ? 'Moto' : 'Auto'}
+------------------------------------------
+Dominio:        ${dash(data.dominio)}
+Marca:          ${dash(data.marca)}
+Modelo:         ${dash(data.modelo)}
+N. Chasis:      ${dash(data.chasis)}
+N. Motor:       ${dash(data.motor)}
+N. Cuadro:      ${dash(data.cuadro)}
+------------------------------------------
+Actualizado:    ${fecha}
+(Datos extraidos automaticamente de la cedula)
+`
+    fs.writeFileSync(path.join(destDir, 'datos.txt'), contenido, 'utf-8')
+    console.log(`📝 datos.txt escrito en ${carpeta}`)
+  } catch (err) {
+    console.error('❌ Error escribiendo datos.txt:', err.message)
+  }
+}
+
+// Guarda los datos de la cédula en SQLite y en el bloc de notas de la carpeta
+function guardarDatosVehiculo(args) {
+  upsertVehiculo(args)
+  writeDatosTxt(args)
+}
 
 app.use(cors())
 app.use(express.json())
@@ -78,6 +179,40 @@ async function sendNotificationEmail({ dni, gestion, tipo, fotos, fecha, carpeta
   }
 }
 
+async function sendCorrectionEmail({ dni, carpeta, foto, tipo, fecha, etiqueta }) {
+  if (!transporter) {
+    console.log('⚠️  Email no configurado. Saltando notificación de corrección.')
+    return
+  }
+  try {
+    await transporter.sendMail({
+      from: `"BELT Inspecciones" <${SMTP_USER}>`,
+      to: NOTIFY_EMAIL,
+      subject: `Inspección CORREGIDA - DNI ${dni}`,
+      html: `
+        <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px;">
+          <h2 style="color:#1a1a1a;border-bottom:3px solid #c9e100;padding-bottom:10px;">
+            Inspección Corregida
+          </h2>
+          <p style="color:#b45309;font-weight:bold;">Se reemplazó una foto de una inspección existente.</p>
+          <table style="width:100%;border-collapse:collapse;margin:20px 0;">
+            <tr><td style="padding:8px;font-weight:bold;color:#666;">DNI:</td><td style="padding:8px;">${dni}</td></tr>
+            <tr style="background:#f9f9f9;"><td style="padding:8px;font-weight:bold;color:#666;">Tipo:</td><td style="padding:8px;">${tipo === 'moto' ? 'Moto' : 'Auto'}</td></tr>
+            <tr><td style="padding:8px;font-weight:bold;color:#666;">Foto reemplazada:</td><td style="padding:8px;">${etiqueta || foto}</td></tr>
+            <tr style="background:#f9f9f9;"><td style="padding:8px;font-weight:bold;color:#666;">Archivo:</td><td style="padding:8px;font-family:monospace;">${foto}</td></tr>
+            <tr><td style="padding:8px;font-weight:bold;color:#666;">Carpeta:</td><td style="padding:8px;font-family:monospace;">${carpeta}</td></tr>
+            <tr style="background:#f9f9f9;"><td style="padding:8px;font-weight:bold;color:#666;">Fecha:</td><td style="padding:8px;">${fecha}</td></tr>
+          </table>
+          <p style="color:#888;font-size:12px;margin-top:20px;">Este es un mensaje automático del sistema de inspecciones BELT Fotos.</p>
+        </div>
+      `,
+    })
+    console.log(`✉️  Email de corrección enviado a ${NOTIFY_EMAIL}`)
+  } catch (err) {
+    console.error('❌ Error enviando email de corrección:', err.message)
+  }
+}
+
 // Forzar no-cache en HTML y PNGs para evitar problemas con Cloudflare/browser cache
 app.use((req, res, next) => {
   if (req.path === '/' || req.path.endsWith('.html') || req.path.endsWith('.png')) {
@@ -95,6 +230,96 @@ app.use(express.static(distPath))
 // ── Gemini AI pre-capture validation ─────────────────────────
 const GEMINI_KEY = process.env.GEMINI_KEY || ''
 const genAI = GEMINI_KEY ? new GoogleGenerativeAI(GEMINI_KEY) : null
+
+// ── Claude (Anthropic) OCR de cédula ─────────────────────────
+const ANTHROPIC_KEY = process.env.ANTHROPIC_KEY || ''
+const ANTHROPIC_MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-6'
+
+const CEDULA_PROMPT = `Sos un extractor de datos de cédulas de identificación vehicular argentinas (cédula verde/azul o título), especializado en transcribir con máxima precisión el número de chasis/VIN, que suele tener 17 caracteres alfanuméricos sin espacios.
+
+PASO 1 — ANÁLISIS (obligatorio, en texto plano antes del JSON):
+Para el campo "chasis" en particular, transcribí el valor carácter por carácter, uno por uno, indicando para cada carácter dudoso qué otra letra/número podría confundirse (ej: "posición 5: parece 'O' pero podría ser '0'"). Prestá especial atención a estos pares que se confunden fácilmente en fotos: O/0, I/1/L, B/8, S/5, Z/2, G/6, U/V. Si la imagen está borrosa, con reflejo o el número está parcialmente tapado, decilo explícitamente.
+
+PASO 2 — JSON FINAL (obligatorio):
+Después del análisis, escribí la línea "JSON_FINAL:" seguida SOLO del JSON en la línea siguiente, con estas claves EXACTAS y nada más de texto después:
+{"dominio": "", "marca": "", "modelo": "", "chasis": "", "motor": "", "cuadro": ""}
+
+Reglas:
+- "dominio": patente/dominio del vehículo (ej: AB123CD o ABC123).
+- "marca": marca del vehículo.
+- "modelo": modelo/versión del vehículo.
+- "chasis": número de chasis / VIN. SOLO completá este campo si pudiste leer TODOS los caracteres con confianza alta tras el análisis del PASO 1; si tenés dudas sobre uno o más caracteres que no pudiste resolver, dejalo como string vacío "" en vez de adivinar.
+- "motor": número de motor.
+- "cuadro": número de cuadro (en motos suele coincidir con el chasis; si no figura, dejar vacío).
+- Transcribí exactamente lo que leas, en MAYÚSCULAS, sin espacios extra.
+- Si un dato no se ve o no está, dejá el valor como string vacío "".
+- No inventes ni completes datos por suposición. Es preferible dejar un campo vacío antes que adivinar mal.`
+
+// El VIN/chasis de vehículos no arranca con la letra "B" (no es un carácter válido
+// como primer dígito en los prefijos que usan las terminales locales). Si el OCR
+// lo transcribió así, es casi siempre una confusión visual con el número "8".
+function fixChasisLeadingB(value) {
+  if (value && value[0] === 'B') return '8' + value.slice(1)
+  return value
+}
+
+// Extrae datos de la cédula usando Claude. Devuelve objeto o null.
+async function extractCedulaData(imageBuffer, mimeType = 'image/jpeg') {
+  if (!ANTHROPIC_KEY) {
+    console.log('⚠️  ANTHROPIC_KEY no configurada. Saltando OCR de cédula.')
+    return null
+  }
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': ANTHROPIC_KEY,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: ANTHROPIC_MODEL,
+        max_tokens: 1024,
+        messages: [{
+          role: 'user',
+          content: [
+            { type: 'image', source: { type: 'base64', media_type: mimeType, data: imageBuffer.toString('base64') } },
+            { type: 'text', text: CEDULA_PROMPT },
+          ],
+        }],
+      }),
+    })
+    if (!res.ok) {
+      const errText = await res.text()
+      console.error('❌ Anthropic API error:', res.status, errText.slice(0, 200))
+      return null
+    }
+    const json = await res.json()
+    const text = (json.content || []).map(c => c.text || '').join('').trim()
+    // El modelo debe emitir "JSON_FINAL:" antes del JSON; si no está el marcador,
+    // caemos de vuelta a buscar el primer bloque {...} en toda la respuesta.
+    const markerIdx = text.indexOf('JSON_FINAL:')
+    const jsonSection = markerIdx >= 0 ? text.slice(markerIdx + 'JSON_FINAL:'.length) : text
+    const match = jsonSection.match(/\{[\s\S]*\}/)
+    if (!match) {
+      console.error('❌ OCR cédula: respuesta sin JSON:', text.slice(0, 300))
+      return null
+    }
+    console.log('🔎 OCR cédula - análisis:', text.slice(0, markerIdx >= 0 ? markerIdx : 0).trim().slice(0, 500))
+    const parsed = JSON.parse(match[0])
+    return {
+      dominio: (parsed.dominio || '').toString().trim().toUpperCase(),
+      marca: (parsed.marca || '').toString().trim().toUpperCase(),
+      modelo: (parsed.modelo || '').toString().trim().toUpperCase(),
+      chasis: fixChasisLeadingB((parsed.chasis || '').toString().trim().toUpperCase()),
+      motor: (parsed.motor || '').toString().trim().toUpperCase(),
+      cuadro: fixChasisLeadingB((parsed.cuadro || '').toString().trim().toUpperCase()),
+    }
+  } catch (err) {
+    console.error('❌ Error en OCR de cédula:', err.message)
+    return null
+  }
+}
 
 const FRAME_PROMPTS = {
   'frente':       'Se pide: FRENTE del vehículo (capó, faros, patente delantera). ¿Esta imagen muestra el frente?',
@@ -207,6 +432,18 @@ app.post('/api/guardar-inspeccion', (req, res, next) => {
     fecha,
     carpeta: folderName,
   })
+
+  // OCR de cédula → guardar datos en SQLite (async, no bloquea la respuesta)
+  // El front envía "pasos": JSON con los ids de cada paso, en el mismo orden que las fotos.
+  let pasos = []
+  try { pasos = JSON.parse(req.body.pasos || '[]') } catch (e) { pasos = [] }
+  const cedulaIdx = pasos.indexOf('cedula-f')
+  if (cedulaIdx >= 0 && req.files[cedulaIdx]) {
+    const cedulaBuffer = req.files[cedulaIdx].buffer
+    extractCedulaData(cedulaBuffer).then(data => {
+      if (data) guardarDatosVehiculo({ dni: dniClean, carpeta: folderName, tipo: tipo || 'auto', data })
+    }).catch(err => console.error('❌ OCR cédula (guardar):', err.message))
+  }
 })
 
 // GET /api/inspecciones – PROTECTED: requires admin key
@@ -267,7 +504,7 @@ app.get('/api/imagen/:carpeta/:foto', (req, res) => {
 
 // GET /api/health
 app.get('/api/health', (req, res) => {
-  res.json({ ok: true, version: '1.3.0' })
+  res.json({ ok: true, version: '1.6.2' })
 })
 
 // Página de diagnóstico para mobile
@@ -309,6 +546,103 @@ l('7. ServiceWorker: ' + ('serviceWorker' in navigator ? 'SI' : 'NO'));
 if(navigator.connection) l('8. Connection: ' + navigator.connection.effectiveType + ' downlink:' + navigator.connection.downlink + 'Mbps');
 </script>
 </body></html>`)
+})
+
+// ── CORRECCIÓN DE INSPECCIONES (público, scope por DNI) ──────────
+
+// GET /api/inspecciones-dni/:dni – busca inspecciones cuyo folder empieza con el DNI
+app.get('/api/inspecciones-dni/:dni', (req, res) => {
+  const dniClean = String(req.params.dni).replace(/\./g, '').replace(/\s/g, '')
+  if (!dniClean || !/^\d+$/.test(dniClean)) return res.status(400).json({ error: 'DNI inválido' })
+  try {
+    if (!fs.existsSync(DB_BASE)) return res.json({ inspecciones: [] })
+    const dirs = fs.readdirSync(DB_BASE, { withFileTypes: true })
+      .filter(d => d.isDirectory() && d.name.startsWith(dniClean + '-'))
+      .map(d => {
+        const dirPath = path.join(DB_BASE, d.name)
+        const files = fs.readdirSync(dirPath)
+          .filter(f => /^\d+\.jpg$/i.test(f))
+          .sort((a, b) => parseInt(a, 10) - parseInt(b, 10))
+        const stat = fs.statSync(dirPath)
+        let tipo = 'auto'
+        const metaPath = path.join(dirPath, 'meta.json')
+        if (fs.existsSync(metaPath)) {
+          try { tipo = JSON.parse(fs.readFileSync(metaPath, 'utf-8')).tipo || 'auto' } catch (e) { /* ignore */ }
+        }
+        return {
+          carpeta: d.name,
+          patente: d.name.slice(dniClean.length + 1),
+          tipo,
+          fotos: files,
+          fecha: stat.mtime.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
+          mtime: stat.mtime.getTime(),
+        }
+      })
+      .sort((a, b) => b.mtime - a.mtime)
+    res.json({ inspecciones: dirs })
+  } catch (err) {
+    console.error('Error en /api/inspecciones-dni:', err)
+    res.status(500).json({ error: 'Error interno' })
+  }
+})
+
+// GET /api/foto-correccion/:carpeta/:foto – sirve una foto para el flujo de corrección
+app.get('/api/foto-correccion/:carpeta/:foto', (req, res) => {
+  const carpeta = path.basename(req.params.carpeta)
+  const foto = path.basename(req.params.foto)
+  if (carpeta !== req.params.carpeta || foto !== req.params.foto || !/^\d+\.jpg$/i.test(foto)) {
+    return res.status(400).json({ error: 'Parámetros inválidos' })
+  }
+  const filePath = path.join(DB_BASE, carpeta, foto)
+  if (!filePath.startsWith(path.resolve(DB_BASE))) return res.status(403).json({ error: 'Acceso denegado' })
+  if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Imagen no encontrada' })
+  res.setHeader('Cache-Control', 'no-store')
+  res.sendFile(filePath)
+})
+
+// POST /api/corregir-inspeccion – reemplaza (pisa) una foto puntual de una inspección
+app.post('/api/corregir-inspeccion', (req, res, next) => {
+  upload.single('foto')(req, res, (err) => {
+    if (err) {
+      console.error('Multer error (corrección):', err.message)
+      return res.status(400).json({ error: 'Error al subir foto: ' + err.message })
+    }
+    next()
+  })
+}, (req, res) => {
+  const { dni, carpeta, fotoIndex, tipo, etiqueta } = req.body
+  if (!dni || !carpeta || !fotoIndex) return res.status(400).json({ error: 'Datos incompletos' })
+  if (!req.file) return res.status(400).json({ error: 'No se recibió la foto' })
+
+  const dniClean = String(dni).replace(/\./g, '').replace(/\s/g, '')
+  const carpetaSafe = path.basename(carpeta)
+  if (carpetaSafe !== carpeta || !carpetaSafe.startsWith(dniClean + '-')) {
+    return res.status(400).json({ error: 'Carpeta inválida' })
+  }
+  const idx = parseInt(fotoIndex, 10)
+  if (!Number.isInteger(idx) || idx < 1 || idx > 15) return res.status(400).json({ error: 'Índice inválido' })
+
+  const destDir = path.join(DB_BASE, carpetaSafe)
+  if (!destDir.startsWith(path.resolve(DB_BASE)) || !fs.existsSync(destDir)) {
+    return res.status(404).json({ error: 'Inspección no encontrada' })
+  }
+
+  const filename = `${idx}.jpg`
+  fs.writeFileSync(path.join(destDir, filename), req.file.buffer)
+
+  const fecha = new Date().toLocaleString('es-AR', { dateStyle: 'long', timeStyle: 'short' })
+  console.log(`✓ Inspección CORREGIDA: ${carpetaSafe}/${filename}`)
+  res.json({ ok: true, carpeta: carpetaSafe, foto: filename })
+
+  sendCorrectionEmail({ dni: dniClean, carpeta: carpetaSafe, foto: filename, tipo: tipo || 'auto', fecha, etiqueta })
+
+  // Si se corrigió la cédula frente, re-extraer datos y actualizar SQLite
+  if (req.body.stepId === 'cedula-f') {
+    const buf = req.file.buffer
+    extractCedulaData(buf).then(data => {
+      if (data) guardarDatosVehiculo({ dni: dniClean, carpeta: carpetaSafe, tipo: tipo || 'auto', data })
+    }).catch(err => console.error('❌ OCR cédula (corrección):', err.message))
+  }
 })
 
 // SPA fallback: /1-4-0/* → beta version

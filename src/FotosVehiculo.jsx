@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
-import { ArrowLeft, Camera, RotateCcw, CheckCircle, Download, X, Save, Upload, Image, Car, Bike, MessageCircle, Zap, ZapOff, ImagePlus } from 'lucide-react'
+import { ArrowLeft, Camera, RotateCcw, CheckCircle, Download, X, Save, Upload, Image, Car, Bike, Share2, Zap, ZapOff, Paperclip, AlertTriangle } from 'lucide-react'
 import { analyzeFrameFull, resetGeminiCache, DETECTABLE_STEPS } from './frameAnalyzer'
 
-const APP_VERSION = '1.4.0'
+const APP_VERSION = '1.6.2'
 
 // Preload logo for watermark
 const logoImg = new window.Image()
@@ -36,17 +36,21 @@ const STEPS_AUTO = [
 // ── MOTO: 9 fotos en 2 secciones ──
 const STEPS_MOTO = [
   // Sección A – Fotos de la Moto
-  { id: 'frente',       fullLabel: 'Frente',                    instruction: 'Patente delantera legible. Faro en cuadro.',        section: 'A', sectionLabel: 'Fotos de la Moto',      view: 'moto-front' },
+  { id: 'frente',       fullLabel: 'Frente',                    instruction: 'Frente completo nítido.',                            section: 'A', sectionLabel: 'Fotos de la Moto',      view: 'moto-front' },
   { id: 'perfil-der',   fullLabel: 'Perfil Derecho',            instruction: 'Lateral derecho completo. Ruedas en cuadro.',       section: 'A', sectionLabel: 'Fotos de la Moto',      view: 'moto-side-flip' },
   { id: 'perfil-izq',   fullLabel: 'Perfil Izquierdo',          instruction: 'Lateral izquierdo completo. Ruedas en cuadro.',     section: 'A', sectionLabel: 'Fotos de la Moto',      view: 'moto-side' },
   { id: 'trasera',      fullLabel: 'Trasera',                   instruction: 'Patente trasera legible. Luces de posición en cuadro.', section: 'A', sectionLabel: 'Fotos de la Moto',  view: 'moto-rear' },
   // Sección B – Identificación y Datos
-  { id: 'chasis',       fullLabel: 'N° de Chasis / VIN',        instruction: 'Foto nítida del número de chasis.',                section: 'B', sectionLabel: 'Identificación y Datos', view: 'chasis' },
-  { id: 'motor',        fullLabel: 'N° de Motor',               instruction: 'Foto nítida del número de motor.',                 section: 'B', sectionLabel: 'Identificación y Datos', view: 'motor' },
+  { id: 'chasis',       fullLabel: 'N° de Chasis / VIN',        instruction: 'Número de chasis grabado en el cristo o cuadro según modelo.',  section: 'B', sectionLabel: 'Identificación y Datos', view: 'chasis' },
+  { id: 'motor',        fullLabel: 'N° de Motor',               instruction: 'Número de motor grabado en aluminio, imagen nítida.',           section: 'B', sectionLabel: 'Identificación y Datos', view: 'motor' },
   { id: 'tablero',      fullLabel: 'Tablero',                   instruction: 'Foto con el tablero encendido.',                   section: 'B', sectionLabel: 'Identificación y Datos', view: 'tablero' },
   { id: 'cedula-f',     fullLabel: 'Cédula Frente',             instruction: 'Frente de la cédula del titular.',                 section: 'B', sectionLabel: 'Identificación y Datos', view: 'cedula-frente' },
   { id: 'cedula-d',     fullLabel: 'Cédula Dorso',              instruction: 'Dorso de la cédula del titular.',                  section: 'B', sectionLabel: 'Identificación y Datos', view: 'cedula-dorso' },
 ]
+
+// ── Imágenes de referencia para chasis y motor ──
+const IMG_REF_CHASIS = '/img/DETALLES/chasis - cuello direccion izquierdo.png'
+const IMG_REF_MOTOR = '/img/DETALLES/motor - carter inferior izquierdo.png'
 
 function fmtShort(d) {
   return d.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' }) +
@@ -148,46 +152,6 @@ function applyWatermark(canvas, step, geoCoords, locality) {
     ctx.fillText(line2, centerX, wmY + wmFontSize * 1.5 + lineH)
   }
   ctx.restore()
-
-  // ─── 2. TOP BANNER ───
-  const topH = Math.max(52, Math.floor(H * 0.07))
-  const px = Math.floor(W * 0.02)
-  ctx.fillStyle = 'rgba(0,0,0,0.88)'
-  ctx.fillRect(0, 0, W, topH)
-  ctx.fillStyle = '#c9e100'
-  ctx.fillRect(0, 0, Math.max(5, Math.floor(W * 0.008)), topH)
-
-  // Logo in top banner
-  if (logoImg.complete && logoImg.naturalWidth > 0) {
-    const logoH = Math.floor(topH * 0.7)
-    const logoW = Math.floor(logoH * (logoImg.naturalWidth / logoImg.naturalHeight))
-    ctx.drawImage(logoImg, px + Math.floor(W * 0.005), Math.floor((topH - logoH) / 2), logoW, logoH)
-  }
-
-  // Step label (right)
-  ctx.textAlign = 'right'
-  ctx.textBaseline = 'middle'
-  ctx.fillStyle = '#ffffff'
-  ctx.font = `bold ${Math.floor(topH * 0.38)}px Arial`
-  ctx.fillText(step.fullLabel.toUpperCase(), W - px, topH * 0.5)
-
-  // ─── 3. BOTTOM BANNER ───
-  const botH = Math.max(40, Math.floor(H * 0.045))
-  ctx.fillStyle = 'rgba(0,0,0,0.88)'
-  ctx.fillRect(0, H - botH, W, botH)
-  ctx.fillStyle = '#c9e100'
-  ctx.fillRect(0, H - botH, Math.max(5, Math.floor(W * 0.008)), botH)
-
-  ctx.textAlign = 'left'
-  ctx.textBaseline = 'middle'
-  ctx.fillStyle = '#c9e100'
-  ctx.font = `bold ${Math.floor(botH * 0.4)}px Arial`
-  ctx.fillText('INSPECCIÓN VEHICULAR', px, H - botH + botH * 0.5)
-
-  ctx.textAlign = 'right'
-  ctx.fillStyle = 'rgba(255,255,255,0.5)'
-  ctx.font = `${Math.floor(botH * 0.3)}px Arial`
-  ctx.fillText(`v${APP_VERSION}`, W - px, H - botH + botH * 0.5)
 }
 
 // ── Main component ───────────────────────────────────────────────
@@ -220,6 +184,17 @@ export default function FotosVehiculo() {
   const [numGestion, setNumGestion] = useState(null)
   const [geoCoords, setGeoCoords] = useState(null)
   const [geoLocality, setGeoLocality] = useState(null)
+  const [showDisclaimer, setShowDisclaimer] = useState(true)
+
+  // Correction flow
+  const [correctDni, setCorrectDni] = useState('')
+  const [correctList, setCorrectList] = useState(null)
+  const [correctFolder, setCorrectFolder] = useState(null)
+  const [correctPhotoIdx, setCorrectPhotoIdx] = useState(null)
+  const [correctMode, setCorrectMode] = useState(false)
+  const [correctBlob, setCorrectBlob] = useState(null)
+  const [correctBusy, setCorrectBusy] = useState(false)
+  const [correctErr, setCorrectErr] = useState(null)
 
   const STEPS = vehicleType === 'moto' ? STEPS_MOTO : STEPS_AUTO
   const step = STEPS[stepIdx] || STEPS[0]
@@ -409,6 +384,19 @@ export default function FotosVehiculo() {
       canvas.width = img.width
       canvas.height = img.height
       canvas.getContext('2d').drawImage(img, 0, 0)
+      if (correctMode && correctPhotoIdx !== null) {
+        const stepsArr = correctFolder?.tipo === 'moto' ? STEPS_MOTO : STEPS_AUTO
+        const targetStep = stepsArr[correctPhotoIdx - 1]
+        applyWatermark(canvas, targetStep, geoCoords, geoLocality)
+        canvas.toBlob((blob) => {
+          if (!blob) return
+          setCorrectBlob(blob)
+          setPreview(URL.createObjectURL(blob))
+          setPhase('correct-preview')
+        }, 'image/jpeg', 0.93)
+        URL.revokeObjectURL(img.src)
+        return
+      }
       const currentStep = STEPS[stepIdx]
       applyWatermark(canvas, currentStep, geoCoords, geoLocality)
       canvas.toBlob((blob) => {
@@ -467,6 +455,7 @@ export default function FotosVehiculo() {
     formData.append('patente', gestion)
     formData.append('tipo', vehicleType)
     formData.append('gestion', gestion)
+    formData.append('pasos', JSON.stringify(STEPS.map(s => s.id)))
     photos.forEach(p => formData.append('fotos', p.blob, `foto.jpg`))
 
     try {
@@ -511,21 +500,110 @@ export default function FotosVehiculo() {
     setPhase('camera')
   }
 
-  // Send WhatsApp with gestion details (ping QR for tracking)
-  const handleWhatsApp = () => {
+  // Share inspection details via native share
+  const handleShare = async () => {
     // Tracking ping al QR
     fetch('https://uqr.to/28imm', { mode: 'no-cors' }).catch(() => {})
-    // Abrir WhatsApp con mensaje completo
-    const msg = `*INSPECCIÓN REALIZADA*%0A%0A` +
-      `*Mi número de inspección es el ${numGestion}*%0A%0A` +
-      `DNI: *${dni.trim()}*%0A` +
-      `Tipo: *${vehicleType === 'moto' ? 'Moto' : 'Auto'}*%0A` +
-      `Fotos: ${photos.length}%0A` +
+    const text = `*INSPECCIÓN REALIZADA*\n\n` +
+      `*Mi número de inspección es el ${numGestion}*\n\n` +
+      `DNI: *${dni.trim()}*\n` +
+      `Tipo: *${vehicleType === 'moto' ? 'Moto' : 'Auto'}*\n` +
+      `Fotos: ${photos.length}\n` +
       `Fecha: ${new Date().toLocaleDateString('es-AR')}`
-    window.open(`https://wa.me/5491125333156?text=${msg}`, '_blank')
+    if (navigator.share) {
+      try {
+        await navigator.share({ title: 'Inspección BELT', text })
+      } catch (e) { /* user cancelled */ }
+    } else {
+      // Fallback: copy to clipboard
+      try { await navigator.clipboard.writeText(text) } catch(e) {}
+      alert('Texto copiado al portapapeles. Pegalo en WhatsApp o donde quieras.')
+    }
   }
 
-  const goBack = () => {
+  // ── Corrección de inspecciones ──────────────────────────────
+  const startCorrection = () => {
+    setCorrectDni(''); setCorrectList(null); setCorrectFolder(null)
+    setCorrectPhotoIdx(null); setCorrectBlob(null); setCorrectErr(null); setCorrectMode(false)
+    setPhase('correct-dni')
+  }
+
+  const buscarInspecciones = async () => {
+    const dniClean = correctDni.trim().replace(/\./g, '').replace(/\s/g, '')
+    if (!dniClean) return
+    setCorrectBusy(true); setCorrectErr(null)
+    try {
+      const res = await fetch(`/api/inspecciones-dni/${encodeURIComponent(dniClean)}`)
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Error del servidor')
+      setCorrectList(data.inspecciones || [])
+      setPhase('correct-list')
+    } catch (e) { setCorrectErr(e.message) }
+    finally { setCorrectBusy(false) }
+  }
+
+  const selectCorrectFolder = (folder) => {
+    setCorrectFolder(folder)
+    setPhase('correct-photos')
+  }
+
+  const startRetakeCorrection = (idx1) => {
+    setCorrectPhotoIdx(idx1)
+    setVehicleType(correctFolder.tipo)
+    setStepIdx(idx1 - 1)
+    setCorrectMode(true)
+    setPreview(null); setCorrectBlob(null); setCorrectErr(null)
+    setCamReady(false); setCamError(null)
+    setPhase('camera')
+  }
+
+  const handleCaptureCorrection = useCallback(() => {
+    const video = videoRef.current
+    if (!video || !camReady || correctPhotoIdx === null) return
+    const stepsArr = correctFolder?.tipo === 'moto' ? STEPS_MOTO : STEPS_AUTO
+    const targetStep = stepsArr[correctPhotoIdx - 1]
+    const canvas = document.createElement('canvas')
+    canvas.width = video.videoWidth || 1280
+    canvas.height = video.videoHeight || 720
+    canvas.getContext('2d').drawImage(video, 0, 0)
+    applyWatermark(canvas, targetStep, geoCoords, geoLocality)
+    canvas.toBlob((blob) => {
+      if (!blob) return
+      setCorrectBlob(blob)
+      setPreview(URL.createObjectURL(blob))
+      setPhase('correct-preview')
+    }, 'image/jpeg', 0.93)
+  }, [camReady, correctPhotoIdx, correctFolder, geoCoords, geoLocality])
+
+  const handleUploadCorrection = async () => {
+    if (!correctBlob || !correctFolder || correctPhotoIdx === null) return
+    setCorrectBusy(true); setCorrectErr(null)
+    const dniClean = correctDni.trim().replace(/\./g, '').replace(/\s/g, '')
+    const stepsArr = correctFolder.tipo === 'moto' ? STEPS_MOTO : STEPS_AUTO
+    const fd = new FormData()
+    fd.append('dni', dniClean)
+    fd.append('carpeta', correctFolder.carpeta)
+    fd.append('fotoIndex', String(correctPhotoIdx))
+    fd.append('tipo', correctFolder.tipo)
+    fd.append('etiqueta', stepsArr[correctPhotoIdx - 1]?.fullLabel || `Foto ${correctPhotoIdx}`)
+    fd.append('stepId', stepsArr[correctPhotoIdx - 1]?.id || '')
+    fd.append('foto', correctBlob, 'foto.jpg')
+    try {
+      const res = await fetch('/api/corregir-inspeccion', { method: 'POST', body: fd })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Error del servidor')
+      streamRef.current?.getTracks().forEach(t => t.stop())
+      streamRef.current = null
+      setCorrectMode(false); setPreview(null); setCorrectBlob(null)
+      setPhase('correct-done')
+    } catch (e) { setCorrectErr(e.message) }
+    finally { setCorrectBusy(false) }
+  }
+
+  const goBack = (skipConfirm = false) => {
+    if (!skipConfirm && phase !== 'select') {
+      if (!window.confirm('Si cerrás ahora perdés todas las fotos y el progreso. ¿Estás seguro?')) return
+    }
     streamRef.current?.getTracks().forEach(t => t.stop())
     streamRef.current = null
     setVehicleType(null); setPhase('select'); setStepIdx(0);
@@ -534,13 +612,16 @@ export default function FotosVehiculo() {
     setCamReady(false); setCamError(null); setNumGestion(null);
     setGeoCoords(null); setGeoLocality(null); setFlashOn(false); setFlashAvail(false);
     setRetakeIdx(null); setDetected(false);
+    setCorrectDni(''); setCorrectList(null); setCorrectFolder(null);
+    setCorrectPhotoIdx(null); setCorrectMode(false); setCorrectBlob(null);
+    setCorrectBusy(false); setCorrectErr(null);
   }
 
   // ── SELECT screen (Auto / Moto) ─────────────────────────────
   if (phase === 'select') return (
     <div className="h-[100dvh] bg-black flex flex-col safe-top overflow-hidden">
       <div className="flex-1 flex flex-col items-center justify-center px-5">
-        <video src="/logo-belt-animated.mp4" autoPlay muted playsInline className="w-72 mx-auto pointer-events-none"/>
+        <img src="/logo-belt-animated.apng" alt="BELT Seguros" className="w-56 mx-auto"/>
         <h1 className="text-white font-black text-3xl mt-1">Inspección Vehicular</h1>
         <p className="text-gray-400 text-lg mt-1">Seleccioná el tipo de vehículo</p>
         <div className="w-full max-w-sm space-y-3 mt-5">
@@ -564,9 +645,166 @@ export default function FotosVehiculo() {
               <p className="text-gray-400 text-sm">9 fotos · moto y documentos</p>
             </div>
           </button>
+          <button onClick={startCorrection}
+            className="w-full bg-transparent border border-white/15 hover:border-belt-yellow/60 rounded-2xl px-5 py-3 flex items-center justify-center gap-2 transition-all active:scale-95 mt-1">
+            <RotateCcw size={18} className="text-belt-yellow"/>
+            <span className="text-white font-bold text-base">Corregir Inspección</span>
+          </button>
         </div>
       </div>
       <p className="text-center text-gray-600 text-xs pb-3 font-bold uppercase tracking-widest">BELT Seguros · v{APP_VERSION}</p>
+
+      {/* Disclaimer popup */}
+      {showDisclaimer && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm px-5">
+          <div className="w-full max-w-sm bg-belt-dark border border-belt-yellow/40 rounded-3xl p-6 shadow-2xl">
+            <div className="w-14 h-14 bg-belt-yellow/15 rounded-2xl flex items-center justify-center mx-auto mb-4">
+              <AlertTriangle size={30} className="text-belt-yellow"/>
+            </div>
+            <h2 className="text-white font-black text-xl text-center mb-3">Importante</h2>
+            <p className="text-gray-200 text-base leading-relaxed text-center mb-6">Por favor, recuerde que si va a tomar las fotos para realizar la inspección, tiene que haber coordinado previamente la misma, ya que tiene vigencia solo durante el día y en horas hábiles.</p>
+            <button onClick={() => setShowDisclaimer(false)}
+              className="w-full btn-primary py-4 text-base font-bold">
+              Entendido
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+
+  // ── CORRECCIÓN: ingresar DNI ─────────────────────────────────
+  if (phase === 'correct-dni') return (
+    <div className="min-h-screen bg-belt-dark flex flex-col safe-top safe-bottom">
+      <div className="flex items-center gap-3 px-4 py-4 border-b border-white/10">
+        <button onClick={() => goBack(true)} className="text-white"><ArrowLeft size={24}/></button>
+        <p className="text-white font-black text-lg">Corregir Inspección</p>
+      </div>
+      <div className="flex-1 px-5 py-8">
+        <p className="text-gray-300 mb-6">Ingresá el DNI del titular para buscar las inspecciones realizadas.</p>
+        <label className="text-gray-400 text-sm font-bold uppercase tracking-wide mb-1.5 block">DNI del titular</label>
+        <input type="text" inputMode="numeric" placeholder="Ej: 35.123.456"
+          value={correctDni} onChange={e => setCorrectDni(e.target.value)}
+          className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-4 text-white text-xl font-bold placeholder-gray-500 focus:outline-none focus:border-belt-yellow mb-4"/>
+        {correctErr && <div className="bg-red-900/30 border border-red-500/30 rounded-xl p-3 mb-4"><p className="text-red-400">{correctErr}</p></div>}
+        <button onClick={buscarInspecciones} disabled={!correctDni.trim() || correctBusy}
+          className="w-full btn-primary flex items-center justify-center gap-2 py-4 text-lg disabled:opacity-40">
+          {correctBusy ? <><div className="w-5 h-5 border-2 border-belt-dark border-t-transparent rounded-full animate-spin"/> Buscando...</> : 'Buscar inspecciones'}
+        </button>
+      </div>
+    </div>
+  )
+
+  // ── CORRECCIÓN: lista de inspecciones ────────────────────────
+  if (phase === 'correct-list') return (
+    <div className="min-h-screen bg-belt-dark flex flex-col safe-top safe-bottom">
+      <div className="flex items-center gap-3 px-4 py-4 border-b border-white/10">
+        <button onClick={() => setPhase('correct-dni')} className="text-white"><ArrowLeft size={24}/></button>
+        <p className="text-white font-black text-lg">Inspecciones encontradas</p>
+      </div>
+      <div className="flex-1 overflow-y-auto px-4 py-6">
+        {correctList && correctList.length === 0 ? (
+          <div className="text-center mt-10">
+            <p className="text-gray-400 text-lg">No se encontraron inspecciones para ese DNI.</p>
+            <button onClick={() => setPhase('correct-dni')} className="btn-primary mt-6 px-6 py-3">Probar otro DNI</button>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {correctList?.map((insp) => (
+              <button key={insp.carpeta} onClick={() => selectCorrectFolder(insp)}
+                className="w-full bg-white/10 border border-white/20 active:border-belt-yellow rounded-2xl px-4 py-4 flex items-center gap-4 text-left transition-all">
+                <div className="w-12 h-12 bg-belt-yellow/15 rounded-xl flex items-center justify-center flex-shrink-0">
+                  {insp.tipo === 'moto' ? <Bike size={26} className="text-belt-yellow"/> : <Car size={26} className="text-belt-yellow"/>}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-white font-bold text-base truncate">{insp.patente}</p>
+                  <p className="text-gray-400 text-sm">{insp.tipo === 'moto' ? 'Moto' : 'Auto'} · {insp.fotos.length} fotos</p>
+                  <p className="text-gray-500 text-xs mt-0.5">{insp.fecha}</p>
+                </div>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+
+  // ── CORRECCIÓN: elegir foto a rehacer ────────────────────────
+  if (phase === 'correct-photos' && correctFolder) {
+    const stepsArr = correctFolder.tipo === 'moto' ? STEPS_MOTO : STEPS_AUTO
+    return (
+      <div className="min-h-screen bg-belt-dark flex flex-col safe-top safe-bottom">
+        <div className="flex items-center gap-3 px-4 py-4 border-b border-white/10">
+          <button onClick={() => setPhase('correct-list')} className="text-white"><ArrowLeft size={24}/></button>
+          <div>
+            <p className="text-white font-black text-lg">{correctFolder.patente}</p>
+            <p className="text-gray-400 text-sm">Tocá la foto que querés rehacer</p>
+          </div>
+        </div>
+        <div className="flex-1 overflow-y-auto px-4 py-6">
+          <div className="grid grid-cols-3 gap-2">
+            {correctFolder.fotos.map((f) => {
+              const idx1 = parseInt(f, 10)
+              const label = stepsArr[idx1 - 1]?.fullLabel || `Foto ${idx1}`
+              return (
+                <button key={f} onClick={() => startRetakeCorrection(idx1)}
+                  className="relative rounded-lg overflow-hidden aspect-video bg-gray-800 group">
+                  <img src={`/api/foto-correccion/${encodeURIComponent(correctFolder.carpeta)}/${f}`} alt={label} className="w-full h-full object-cover"/>
+                  <div className="absolute inset-0 bg-black/0 group-active:bg-black/50 flex items-center justify-center transition-all">
+                    <RotateCcw size={20} className="text-white opacity-0 group-active:opacity-100 transition-all"/>
+                  </div>
+                  <div className="absolute bottom-0 inset-x-0 bg-black/70 text-center">
+                    <p className="text-white text-[10px] font-bold py-0.5">{idx1}. {label.split(' ')[0]}</p>
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // ── CORRECCIÓN: preview de la foto nueva ─────────────────────
+  if (phase === 'correct-preview') {
+    const stepsArr = correctFolder?.tipo === 'moto' ? STEPS_MOTO : STEPS_AUTO
+    const label = stepsArr[(correctPhotoIdx || 1) - 1]?.fullLabel || ''
+    return (
+      <div className="fixed inset-0 bg-black flex flex-col" style={{ touchAction: 'none' }}>
+        <div className="flex-shrink-0 flex items-center justify-between px-4 py-3 bg-belt-dark safe-top">
+          <p className="text-white font-black text-base">{label}</p>
+          <span className="text-belt-yellow text-sm font-bold bg-white/10 px-3 py-1 rounded-full">Corrección</span>
+        </div>
+        <div className="flex-1 min-h-0 flex items-center justify-center bg-black overflow-hidden">
+          {preview && <img src={preview} alt="preview" className="w-full h-full object-contain"/>}
+        </div>
+        <div className="flex-shrink-0 bg-belt-dark px-4 py-4 space-y-3 safe-bottom">
+          {correctErr && <div className="bg-red-900/30 border border-red-500/30 rounded-xl p-3"><p className="text-red-400 text-sm">{correctErr}</p></div>}
+          <div className="flex gap-3">
+            <button onClick={() => { setPreview(null); setCorrectBlob(null); setCorrectErr(null); setPhase('camera') }}
+              className="flex-1 flex items-center justify-center gap-2 bg-white/10 active:bg-white/20 text-white font-bold py-4 rounded-xl text-base transition-all">
+              <RotateCcw size={18}/> Repetir
+            </button>
+            <button onClick={handleUploadCorrection} disabled={correctBusy}
+              className="flex-1 flex items-center justify-center gap-2 btn-primary py-4 text-base disabled:opacity-40">
+              {correctBusy ? <><div className="w-5 h-5 border-2 border-belt-dark border-t-transparent rounded-full animate-spin"/> Guardando...</> : <><Save size={18}/> Guardar corrección</>}
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // ── CORRECCIÓN: éxito ────────────────────────────────────────
+  if (phase === 'correct-done') return (
+    <div className="min-h-screen bg-belt-dark flex flex-col items-center justify-center safe-top safe-bottom px-6">
+      <div className="w-20 h-20 bg-green-500/20 rounded-full flex items-center justify-center mb-5">
+        <CheckCircle size={44} className="text-green-400"/>
+      </div>
+      <h2 className="text-white font-black text-2xl text-center mb-2">Inspección corregida</h2>
+      <p className="text-gray-300 text-center mb-8">La foto se reemplazó correctamente. Se notificó al equipo de emisión sobre la corrección.</p>
+      <button onClick={() => setPhase('correct-photos')} className="w-full max-w-sm bg-white/10 active:bg-white/20 text-white font-bold py-4 rounded-xl mb-3">Corregir otra foto</button>
+      <button onClick={() => goBack(true)} className="w-full max-w-sm btn-primary py-4">Finalizar</button>
     </div>
   )
 
@@ -609,9 +847,9 @@ export default function FotosVehiculo() {
           ))}
         </div>
 
-        <button onClick={handleWhatsApp}
+        <button onClick={handleShare}
           className="w-full flex items-center justify-center gap-2 bg-green-600 active:bg-green-700 text-white font-bold py-4 rounded-xl transition-all mb-3">
-          <MessageCircle size={18}/> Enviar datos por WhatsApp
+          <Share2 size={18}/> Compartir datos de inspección
         </button>
 
         <button onClick={handleSaveToGallery}
@@ -619,7 +857,7 @@ export default function FotosVehiculo() {
           <Image size={16}/> Guardar en mi fototeca
         </button>
 
-        <button onClick={goBack} className="w-full btn-primary flex items-center justify-center gap-2 py-4 text-base">
+        <button onClick={() => goBack(true)} className="w-full btn-primary flex items-center justify-center gap-2 py-4 text-base">
           <CheckCircle size={16}/> Finalizar
         </button>
       </div>
@@ -745,7 +983,14 @@ export default function FotosVehiculo() {
       <div className="absolute top-0 inset-x-0 z-20 safe-top"
         style={{ background: 'linear-gradient(to bottom, rgba(0,0,0,0.85) 0%, transparent 100%)' }}>
         <div className="flex items-center justify-between px-4 pt-3 pb-6">
-          <button onClick={goBack}
+          <button onClick={() => {
+              if (correctMode) {
+                streamRef.current?.getTracks().forEach(t => t.stop()); streamRef.current = null
+                setCorrectMode(false); setPreview(null); setCorrectBlob(null); setPhase('correct-photos')
+              } else if (window.confirm('Si cerrás ahora perdés todas las fotos y el progreso. ¿Estás seguro?')) {
+                goBack(true)
+              }
+            }}
             className="w-9 h-9 bg-black/50 rounded-full flex items-center justify-center text-white backdrop-blur">
             <X size={18}/>
           </button>
@@ -764,7 +1009,13 @@ export default function FotosVehiculo() {
       {/* Guide overlay – maximized to fill screen */}
       <div className="absolute inset-0 z-10 flex items-center justify-center pointer-events-none"
         style={{ top: '70px', bottom: '150px', left: '8px', right: '8px' }}>
-        <VehicleSilhouette view={step.view} detected={detected}/>
+        {vehicleType === 'moto' && step.id === 'chasis' ? (
+          <img src={IMG_REF_CHASIS} alt="Referencia chasis" className="max-w-full max-h-full object-contain" style={{ mixBlendMode: 'screen', opacity: 0.7 }} />
+        ) : vehicleType === 'moto' && step.id === 'motor' ? (
+          <img src={IMG_REF_MOTOR} alt="Referencia motor" className="max-w-full max-h-full object-contain" style={{ mixBlendMode: 'screen', opacity: 0.7 }} />
+        ) : (
+          <VehicleSilhouette view={step.view} detected={detected}/>
+        )}
       </div>
 
 
@@ -799,7 +1050,8 @@ export default function FotosVehiculo() {
             <span className="text-belt-yellow text-sm font-bold tabular-nums w-12 text-right">{Math.round(((stepIdx + 1) / STEPS.length) * 100)}%</span>
           </div>
           <p className="text-white text-center font-bold text-2xl mb-1">{step.fullLabel}</p>
-          <p className="text-gray-300 text-center text-lg mb-4">{step.instruction}</p>
+          <p className="text-gray-300 text-center text-lg mb-1">{step.instruction}</p>
+          <div className="mb-3"/>
 
           {/* Shutter + Flash + Gallery */}
           <div className="flex items-center justify-center gap-6">
@@ -818,7 +1070,7 @@ export default function FotosVehiculo() {
               {flashOn ? <Zap size={20}/> : <ZapOff size={20}/>}
             </button>
             {/* Shutter */}
-            <button onClick={retakeIdx !== null ? handleCaptureRetake : handleCapture} disabled={!camReady}
+            <button onClick={correctMode ? handleCaptureCorrection : (retakeIdx !== null ? handleCaptureRetake : handleCapture)} disabled={!camReady}
               className="w-20 h-20 rounded-full border-4 border-white flex items-center justify-center transition-transform active:scale-90 disabled:opacity-40"
               style={{ WebkitTapHighlightColor: 'transparent' }}>
               <div className="w-14 h-14 bg-belt-yellow rounded-full flex items-center justify-center shadow-lg">
@@ -828,8 +1080,11 @@ export default function FotosVehiculo() {
             {/* Gallery button (only for Cedula steps) or spacer */}
             {isCedulaStep && retakeIdx === null ? (
               <button onClick={handleGalleryPick}
-                className="w-12 h-12 rounded-full bg-white/15 flex items-center justify-center text-white active:bg-white/30 transition-all">
-                <ImagePlus size={20}/>
+                className="w-20 h-20 rounded-full border-4 border-white flex items-center justify-center text-white active:scale-90 transition-all"
+                style={{ WebkitTapHighlightColor: 'transparent' }}>
+                <div className="w-14 h-14 bg-white/20 rounded-full flex items-center justify-center">
+                  <Paperclip size={28} className="text-white"/>
+                </div>
               </button>
             ) : retakeIdx !== null ? (
               <button onClick={() => { setRetakeIdx(null); setPhase('form') }}
@@ -850,6 +1105,7 @@ export default function FotosVehiculo() {
 
       {/* Hidden file input for gallery pick */}
       <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleFileSelected}/>
+
     </div>
   )
 }

@@ -1,6 +1,6 @@
 node_modules/
 dist/
-!dist/1-4-0/
 database/
 .DS_Store
 *.log
+*.zip
