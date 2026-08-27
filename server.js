@@ -6,76 +6,74 @@ import fs from 'fs'
 import { fileURLToPath } from 'url'
 import nodemailer from 'nodemailer'
 import { GoogleGenerativeAI } from '@google/generative-ai'
-import Database from 'better-sqlite3'
+import pg from 'pg'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const app = express()
-const PORT = 3003
+const PORT = process.env.PORT || 3003
 
 // Carpeta destino: configurable por entorno
 // LOCAL: carpeta relativa para desarrollo
 // SERVIDOR: D:/Fotos - Asegurados
-const DB_BASE = process.env.DB_BASE || path.resolve(__dirname, 'database', 'imagenes', 'vehiculos_asegurados')
+const DB_BASE = process.env.DB_BASE || '/data/fotos'
 
-// ── Base SQLite de datos de vehículos (dentro de la carpeta de inspecciones) ──
+// ── Base PostgreSQL de datos de vehículos ──
 // Se consulta desde el CRM. Se inicializa de forma resiliente: si falla, la app
 // sigue funcionando igual (solo se pierde el guardado de datos de cédula).
-let sqlDb = null
+let pgPool = null
 try {
-  fs.mkdirSync(DB_BASE, { recursive: true })
-  sqlDb = new Database(path.join(DB_BASE, 'inspecciones.db'))
-  sqlDb.pragma('journal_mode = WAL')
-  sqlDb.exec(`
-    CREATE TABLE IF NOT EXISTS vehiculos (
-      dni         TEXT NOT NULL,
-      carpeta     TEXT NOT NULL,
-      tipo        TEXT,
-      dominio     TEXT,
-      marca       TEXT,
-      modelo      TEXT,
-      chasis      TEXT,
-      motor       TEXT,
-      cuadro      TEXT,
-      actualizado TEXT,
-      PRIMARY KEY (dni, carpeta)
-    );
-  `)
-  console.log(`🗄️  SQLite lista: ${path.join(DB_BASE, 'inspecciones.db')}`)
+  const DATABASE_URL = process.env.DATABASE_URL
+  if (DATABASE_URL) {
+    pgPool = new pg.Pool({ connectionString: DATABASE_URL, max: 5 })
+    // Crear tabla si no existe (idempotente)
+    await pgPool.query(`
+      CREATE TABLE IF NOT EXISTS vehiculos (
+        dni         TEXT NOT NULL,
+        carpeta     TEXT NOT NULL,
+        tipo        TEXT,
+        dominio     TEXT,
+        marca       TEXT,
+        modelo      TEXT,
+        chasis      TEXT,
+        motor       TEXT,
+        cuadro      TEXT,
+        actualizado TEXT,
+        PRIMARY KEY (dni, carpeta)
+      );
+    `)
+    console.log('🗄️  PostgreSQL lista')
+  } else {
+    console.log('⚠️  DATABASE_URL no configurada. Se deshabilita guardado de datos.')
+  }
 } catch (err) {
-  console.error('⚠️  No se pudo inicializar SQLite (se deshabilita guardado de datos):', err.message)
-  sqlDb = null
+  console.error('⚠️  No se pudo inicializar PostgreSQL (se deshabilita guardado de datos):', err.message)
+  pgPool = null
 }
 
-function upsertVehiculo({ dni, carpeta, tipo, data }) {
-  if (!sqlDb) return
+async function upsertVehiculo({ dni, carpeta, tipo, data }) {
+  if (!pgPool) return
   try {
-    sqlDb.prepare(`
+    await pgPool.query(`
       INSERT INTO vehiculos (dni, carpeta, tipo, dominio, marca, modelo, chasis, motor, cuadro, actualizado)
-      VALUES (@dni, @carpeta, @tipo, @dominio, @marca, @modelo, @chasis, @motor, @cuadro, @actualizado)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
       ON CONFLICT(dni, carpeta) DO UPDATE SET
-        tipo        = COALESCE(NULLIF(excluded.tipo, ''), vehiculos.tipo),
-        dominio     = COALESCE(NULLIF(excluded.dominio, ''), vehiculos.dominio),
-        marca       = COALESCE(NULLIF(excluded.marca, ''), vehiculos.marca),
-        modelo      = COALESCE(NULLIF(excluded.modelo, ''), vehiculos.modelo),
-        chasis      = COALESCE(NULLIF(excluded.chasis, ''), vehiculos.chasis),
-        motor       = COALESCE(NULLIF(excluded.motor, ''), vehiculos.motor),
-        cuadro      = COALESCE(NULLIF(excluded.cuadro, ''), vehiculos.cuadro),
-        actualizado = excluded.actualizado
-    `).run({
-      dni,
-      carpeta,
-      tipo: tipo || '',
-      dominio: data.dominio || '',
-      marca: data.marca || '',
-      modelo: data.modelo || '',
-      chasis: data.chasis || '',
-      motor: data.motor || '',
-      cuadro: data.cuadro || '',
-      actualizado: new Date().toISOString(),
-    })
+        tipo        = COALESCE(NULLIF(EXCLUDED.tipo, ''), vehiculos.tipo),
+        dominio     = COALESCE(NULLIF(EXCLUDED.dominio, ''), vehiculos.dominio),
+        marca       = COALESCE(NULLIF(EXCLUDED.marca, ''), vehiculos.marca),
+        modelo      = COALESCE(NULLIF(EXCLUDED.modelo, ''), vehiculos.modelo),
+        chasis      = COALESCE(NULLIF(EXCLUDED.chasis, ''), vehiculos.chasis),
+        motor       = COALESCE(NULLIF(EXCLUDED.motor, ''), vehiculos.motor),
+        cuadro      = COALESCE(NULLIF(EXCLUDED.cuadro, ''), vehiculos.cuadro),
+        actualizado = EXCLUDED.actualizado
+    `, [
+      dni, carpeta, tipo || '',
+      data.dominio || '', data.marca || '', data.modelo || '',
+      data.chasis || '', data.motor || '', data.cuadro || '',
+      new Date().toISOString(),
+    ])
     console.log(`🗄️  Datos de vehículo guardados: ${dni} / ${carpeta}`)
   } catch (err) {
-    console.error('❌ Error guardando en SQLite:', err.message)
+    console.error('❌ Error guardando en PostgreSQL:', err.message)
   }
 }
 
@@ -111,9 +109,9 @@ Actualizado:    ${fecha}
   }
 }
 
-// Guarda los datos de la cédula en SQLite y en el bloc de notas de la carpeta
-function guardarDatosVehiculo(args) {
-  upsertVehiculo(args)
+// Guarda los datos de la cédula en PostgreSQL y en el bloc de notas de la carpeta
+async function guardarDatosVehiculo(args) {
+  await upsertVehiculo(args)
   writeDatosTxt(args)
 }
 
@@ -433,15 +431,15 @@ app.post('/api/guardar-inspeccion', (req, res, next) => {
     carpeta: folderName,
   })
 
-  // OCR de cédula → guardar datos en SQLite (async, no bloquea la respuesta)
+  // OCR de cédula → guardar datos en PostgreSQL (async, no bloquea la respuesta)
   // El front envía "pasos": JSON con los ids de cada paso, en el mismo orden que las fotos.
   let pasos = []
   try { pasos = JSON.parse(req.body.pasos || '[]') } catch (e) { pasos = [] }
   const cedulaIdx = pasos.indexOf('cedula-f')
   if (cedulaIdx >= 0 && req.files[cedulaIdx]) {
     const cedulaBuffer = req.files[cedulaIdx].buffer
-    extractCedulaData(cedulaBuffer).then(data => {
-      if (data) guardarDatosVehiculo({ dni: dniClean, carpeta: folderName, tipo: tipo || 'auto', data })
+    extractCedulaData(cedulaBuffer).then(async data => {
+      if (data) await guardarDatosVehiculo({ dni: dniClean, carpeta: folderName, tipo: tipo || 'auto', data })
     }).catch(err => console.error('❌ OCR cédula (guardar):', err.message))
   }
 })
@@ -636,12 +634,123 @@ app.post('/api/corregir-inspeccion', (req, res, next) => {
 
   sendCorrectionEmail({ dni: dniClean, carpeta: carpetaSafe, foto: filename, tipo: tipo || 'auto', fecha, etiqueta })
 
-  // Si se corrigió la cédula frente, re-extraer datos y actualizar SQLite
+  // Si se corrigió la cédula frente, re-extraer datos y actualizar PostgreSQL
   if (req.body.stepId === 'cedula-f') {
     const buf = req.file.buffer
-    extractCedulaData(buf).then(data => {
-      if (data) guardarDatosVehiculo({ dni: dniClean, carpeta: carpetaSafe, tipo: tipo || 'auto', data })
+    extractCedulaData(buf).then(async data => {
+      if (data) await guardarDatosVehiculo({ dni: dniClean, carpeta: carpetaSafe, tipo: tipo || 'auto', data })
     }).catch(err => console.error('❌ OCR cédula (corrección):', err.message))
+  }
+})
+
+// ── API para CRM (Railway Private Networking) ──────────────────────
+// Estos endpoints los consume el CRM-BELT via red interna de Railway.
+// Protegidos con ADMIN_KEY igual que los endpoints de admin.
+
+// GET /api/crm/inspecciones – Lista completa con metadata y stats
+app.get('/api/crm/inspecciones', (req, res) => {
+  if (!ADMIN_KEY || req.headers['x-admin-key'] !== ADMIN_KEY) {
+    return res.status(403).json({ error: 'Acceso denegado' })
+  }
+  try {
+    if (!fs.existsSync(DB_BASE)) return res.json({ inspecciones: [] })
+    const dirs = fs.readdirSync(DB_BASE, { withFileTypes: true })
+      .filter(d => d.isDirectory() && !d.name.startsWith('.'))
+      .map(d => {
+        const dirPath = path.join(DB_BASE, d.name)
+        let stat
+        try { stat = fs.statSync(dirPath) } catch (e) { return null }
+
+        // Fotos
+        let fotos = []
+        try {
+          fotos = fs.readdirSync(dirPath)
+            .filter(f => /\.(jpg|png|webp)$/i.test(f))
+            .sort()
+        } catch (e) { /* ignore */ }
+
+        // meta.json
+        let meta = {}
+        const metaPath = path.join(dirPath, 'meta.json')
+        try {
+          if (fs.existsSync(metaPath)) meta = JSON.parse(fs.readFileSync(metaPath, 'utf-8'))
+        } catch (e) { /* ignore */ }
+
+        // datos.txt existe?
+        const tiene_datos = fs.existsSync(path.join(dirPath, 'datos.txt'))
+
+        return {
+          nombre: d.name,
+          mtime: stat.mtime.getTime() / 1000,  // epoch seconds (Python compatible)
+          fotos,
+          n_fotos: fotos.length,
+          meta,
+          tiene_datos,
+        }
+      })
+      .filter(Boolean)
+      .sort((a, b) => b.mtime - a.mtime)
+
+    res.json({ inspecciones: dirs })
+  } catch (err) {
+    console.error('Error en /api/crm/inspecciones:', err)
+    res.status(500).json({ error: 'Error interno' })
+  }
+})
+
+// GET /api/crm/inspeccion/:carpeta/datos – Datos extraidos de la cedula (datos.txt parseado)
+app.get('/api/crm/inspeccion/:carpeta/datos', (req, res) => {
+  if (!ADMIN_KEY || req.headers['x-admin-key'] !== ADMIN_KEY) {
+    return res.status(403).json({ error: 'Acceso denegado' })
+  }
+  const carpeta = path.basename(req.params.carpeta)
+  if (carpeta !== req.params.carpeta) return res.status(400).json({ error: 'Parámetros inválidos' })
+
+  const rutaDatos = path.join(DB_BASE, carpeta, 'datos.txt')
+  if (!rutaDatos.startsWith(path.resolve(DB_BASE))) return res.status(403).json({ error: 'Acceso denegado' })
+  if (!fs.existsSync(rutaDatos)) return res.json({ datos: {} })
+
+  try {
+    const contenido = fs.readFileSync(rutaDatos, 'utf-8')
+    const datos = {}
+    for (const linea of contenido.split('\n')) {
+      const trimmed = linea.trim()
+      if (!trimmed || trimmed.startsWith('==') || trimmed.startsWith('--') || trimmed.startsWith('(') || trimmed.startsWith('BELT SEGUROS')) continue
+      const idx = trimmed.indexOf(':')
+      if (idx > 0) {
+        const clave = trimmed.slice(0, idx).trim()
+        const valor = trimmed.slice(idx + 1).trim()
+        if (valor && valor !== '-') datos[clave] = valor
+      }
+    }
+    res.json({ datos })
+  } catch (err) {
+    console.error('Error leyendo datos.txt:', err)
+    res.json({ datos: {} })
+  }
+})
+
+// DELETE /api/crm/inspeccion/:carpeta – Eliminar carpeta de inspeccion
+app.delete('/api/crm/inspeccion/:carpeta', (req, res) => {
+  if (!ADMIN_KEY || req.headers['x-admin-key'] !== ADMIN_KEY) {
+    return res.status(403).json({ error: 'Acceso denegado' })
+  }
+  const carpeta = path.basename(req.params.carpeta)
+  if (carpeta !== req.params.carpeta) return res.status(400).json({ error: 'Parámetros inválidos' })
+
+  const ruta = path.join(DB_BASE, carpeta)
+  if (!ruta.startsWith(path.resolve(DB_BASE))) return res.status(403).json({ error: 'Acceso denegado' })
+  if (!fs.existsSync(ruta) || !fs.statSync(ruta).isDirectory()) {
+    return res.status(404).json({ error: 'Inspección no encontrada' })
+  }
+
+  try {
+    fs.rmSync(ruta, { recursive: true, force: true })
+    console.log(`🗑️  Inspección eliminada: ${carpeta}`)
+    res.json({ ok: true })
+  } catch (err) {
+    console.error('Error eliminando inspección:', err)
+    res.status(500).json({ error: 'Error al eliminar: ' + err.message })
   }
 })
 
