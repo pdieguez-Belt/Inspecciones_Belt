@@ -159,6 +159,7 @@ export default function FotosVehiculo() {
   const videoRef  = useRef(null)
   const streamRef = useRef(null)
   const fileInputRef = useRef(null)
+  const capturingRef = useRef(false) // evita doble captura por doble-tap
   const [retakeIdx, setRetakeIdx] = useState(null) // index of photo being retaken from form
   const [detected, setDetected] = useState(false)
   const [debugInfo, setDebugInfo] = useState('')
@@ -242,35 +243,11 @@ export default function FotosVehiculo() {
     return () => navigator.geolocation.clearWatch(watchId)
   }, [vehicleType])
 
-  // Camera: start when vehicle type is selected (phase goes to camera)
-  useEffect(() => {
-    if (!vehicleType) return
-    let active = true
-    navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
-      audio: false,
-    }).then(stream => {
-      if (!active) { stream.getTracks().forEach(t => t.stop()); return }
-      streamRef.current = stream
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream
-        videoRef.current.onloadedmetadata = () => {
-          setCamReady(true)
-          const track = stream.getVideoTracks()[0]
-          const caps = track.getCapabilities?.()
-          if (caps?.torch) setFlashAvail(true)
-        }
-      }
-    }).catch(() => {
-      if (active) setCamError('No se pudo acceder a la cámara. Verificá los permisos del navegador.')
-    })
-    return () => {
-      active = false
-      streamRef.current?.getTracks().forEach(t => t.stop())
-    }
-  }, [vehicleType])
-
   // Re-init camera whenever we enter camera phase and stream is dead
+  // (single source of truth: evita pedir getUserMedia() dos veces en simultáneo
+  // cuando handleSelectVehicle cambia vehicleType + phase en el mismo render,
+  // lo cual generaba una carrera entre dos streams y congelaba la cámara en
+  // la primera foto)
   useEffect(() => {
     if (phase !== 'camera') return
     // If stream still alive, just re-attach
@@ -341,8 +318,10 @@ export default function FotosVehiculo() {
 
   // Capture photo – NO auto-download, just store in memory
   const handleCapture = useCallback(() => {
+    if (capturingRef.current) return
     const video = videoRef.current
     if (!video || !camReady) return
+    capturingRef.current = true
     const currentStep = STEPS[stepIdx]
     const canvas = document.createElement('canvas')
     canvas.width  = video.videoWidth  || 1280
@@ -351,6 +330,7 @@ export default function FotosVehiculo() {
     applyWatermark(canvas, currentStep, geoCoords, geoLocality)
 
     canvas.toBlob((blob) => {
+      capturingRef.current = false
       if (!blob) return
       const previewUrl = URL.createObjectURL(blob)
       setPhotos(prev => [...prev, { url: previewUrl, label: currentStep.fullLabel, blob }])
@@ -420,8 +400,10 @@ export default function FotosVehiculo() {
   }
   // Override handleCapture behavior when retaking from form
   const handleCaptureRetake = useCallback(() => {
+    if (capturingRef.current) return
     const video = videoRef.current
     if (!video || !camReady || retakeIdx === null) return
+    capturingRef.current = true
     const targetStep = STEPS[retakeIdx]
     const canvas = document.createElement('canvas')
     canvas.width = video.videoWidth || 1280
@@ -430,6 +412,7 @@ export default function FotosVehiculo() {
     applyWatermark(canvas, targetStep, geoCoords, geoLocality)
 
     canvas.toBlob((blob) => {
+      capturingRef.current = false
       if (!blob) return
       const previewUrl = URL.createObjectURL(blob)
       setPhotos(prev => {
@@ -558,8 +541,10 @@ export default function FotosVehiculo() {
   }
 
   const handleCaptureCorrection = useCallback(() => {
+    if (capturingRef.current) return
     const video = videoRef.current
     if (!video || !camReady || correctPhotoIdx === null) return
+    capturingRef.current = true
     const stepsArr = correctFolder?.tipo === 'moto' ? STEPS_MOTO : STEPS_AUTO
     const targetStep = stepsArr[correctPhotoIdx - 1]
     const canvas = document.createElement('canvas')
@@ -568,6 +553,7 @@ export default function FotosVehiculo() {
     canvas.getContext('2d').drawImage(video, 0, 0)
     applyWatermark(canvas, targetStep, geoCoords, geoLocality)
     canvas.toBlob((blob) => {
+      capturingRef.current = false
       if (!blob) return
       setCorrectBlob(blob)
       setPreview(URL.createObjectURL(blob))
@@ -606,6 +592,7 @@ export default function FotosVehiculo() {
     }
     streamRef.current?.getTracks().forEach(t => t.stop())
     streamRef.current = null
+    capturingRef.current = false
     setVehicleType(null); setPhase('select'); setStepIdx(0);
     setPhotos([]); setPreview(null); setDni('');
     setUploadMsg(null); setUploadErr(null); setSaved(false);
