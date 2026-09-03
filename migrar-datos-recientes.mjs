@@ -14,9 +14,11 @@
  *   node migrar-datos-recientes.mjs ["\\DESKTOP-K5IO86R\Fotos - Asegurados\inspecciones.db"]
  */
 import Database from 'better-sqlite3'
+import fs from 'fs'
+import os from 'os'
 import path from 'path'
 
-const SQLITE_PATH = process.argv[2] ||
+const SQLITE_PATH_ORIGINAL = process.argv[2] ||
   '\\\\DESKTOP-K5IO86R\\Fotos - Asegurados\\inspecciones.db'
 const RAILWAY_URL = process.env.RAILWAY_URL
 const ADMIN_KEY = process.env.ADMIN_KEY
@@ -26,12 +28,30 @@ if (!RAILWAY_URL || !ADMIN_KEY) {
   process.exit(1)
 }
 
-console.log(`📂 SQLite: ${SQLITE_PATH}`)
+console.log(`📂 SQLite (origen): ${SQLITE_PATH_ORIGINAL}`)
 console.log(`🚂 Railway: ${RAILWAY_URL}`)
 
+// Copiar la DB (+ WAL/SHM si existen) a una carpeta temporal local: abrir un
+// archivo SQLite en modo WAL directo desde un recurso de red (SMB) puede
+// colgarse indefinidamente porque los locks de memoria compartida no
+// funcionan bien sobre la red.
+const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'belt-sqlite-'))
+const SQLITE_PATH = path.join(tmpDir, 'inspecciones.db')
+fs.copyFileSync(SQLITE_PATH_ORIGINAL, SQLITE_PATH)
+// El -shm es un índice derivado que SQLite reconstruye solo; no se puede
+// copiar mientras el proceso remoto lo tiene abierto (EBUSY sobre SMB).
+// El -wal sí se copia porque contiene los cambios recientes no volcados aún.
+const walSrc = SQLITE_PATH_ORIGINAL + '-wal'
+if (fs.existsSync(walSrc)) {
+  try { fs.copyFileSync(walSrc, SQLITE_PATH + '-wal') } catch (e) { console.warn(`⚠️  No se pudo copiar -wal (${e.code}), se usa solo el .db`) }
+}
+console.log(`📄 Copia local temporal: ${SQLITE_PATH}`)
+
 const sqlDb = new Database(SQLITE_PATH, { readonly: true })
-const filas = sqlDb.prepare('SELECT * FROM vehiculos').all()
+// Orden cronológico (más vieja a más nueva) para que el insert en Postgres respete ese orden
+const filas = sqlDb.prepare('SELECT * FROM vehiculos ORDER BY actualizado ASC').all()
 sqlDb.close()
+fs.rmSync(tmpDir, { recursive: true, force: true })
 console.log(`📊 Registros en SQLite: ${filas.length}`)
 
 if (filas.length === 0) {
