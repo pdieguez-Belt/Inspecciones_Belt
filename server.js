@@ -444,6 +444,70 @@ app.post('/api/guardar-inspeccion', (req, res, next) => {
   }
 })
 
+// POST /api/admin/importar-vehiculos – PROTECTED: upsert masivo de filas de la
+// tabla `vehiculos` (usado por migrar-datos-recientes.mjs). Reusa upsertVehiculo
+// con el pgPool interno de Railway, sin exponer el DATABASE_URL hacia afuera.
+app.post('/api/admin/importar-vehiculos', express.json({ limit: '5mb' }), async (req, res) => {
+  if (!ADMIN_KEY || req.headers['x-admin-key'] !== ADMIN_KEY) {
+    return res.status(403).json({ error: 'Acceso denegado' })
+  }
+  const filas = req.body?.filas
+  if (!Array.isArray(filas)) return res.status(400).json({ error: '"filas" debe ser un array' })
+  let ok = 0
+  for (const fila of filas) {
+    try {
+      await upsertVehiculo({
+        dni: fila.dni,
+        carpeta: fila.carpeta,
+        tipo: fila.tipo,
+        data: {
+          dominio: fila.dominio, marca: fila.marca, modelo: fila.modelo,
+          chasis: fila.chasis, motor: fila.motor, cuadro: fila.cuadro,
+        },
+      })
+      ok++
+    } catch (e) { console.error('❌ Error importando fila:', e.message) }
+  }
+  res.json({ ok: true, insertados: ok, total: filas.length })
+})
+
+// POST /api/admin/importar-carpeta – PROTECTED: sube (o completa) una carpeta
+// de inspección tal cual existe en el servidor viejo (fotos, datos.txt, meta.json)
+// al Volume de Railway. Usado por migrar-fotos-recientes.mjs. Idempotente:
+// sobrescribe archivos si ya existen.
+const importUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024, files: 20 } })
+app.post('/api/admin/importar-carpeta', (req, res, next) => {
+  if (!ADMIN_KEY || req.headers['x-admin-key'] !== ADMIN_KEY) {
+    return res.status(403).json({ error: 'Acceso denegado' })
+  }
+  importUpload.array('archivos', 20)(req, res, (err) => {
+    if (err) return res.status(400).json({ error: 'Error al subir archivos: ' + err.message })
+    next()
+  })
+}, (req, res) => {
+  const carpeta = path.basename(req.body.carpeta || '')
+  if (!carpeta || carpeta !== req.body.carpeta) {
+    return res.status(400).json({ error: 'Nombre de carpeta inválido' })
+  }
+  if (!req.files || req.files.length === 0) {
+    return res.status(400).json({ error: 'No se recibieron archivos' })
+  }
+  const destDir = path.join(DB_BASE, carpeta)
+  if (!destDir.startsWith(path.resolve(DB_BASE))) {
+    return res.status(403).json({ error: 'Acceso denegado' })
+  }
+  fs.mkdirSync(destDir, { recursive: true })
+  const saved = []
+  for (const file of req.files) {
+    const filename = path.basename(file.originalname)
+    if (filename !== file.originalname) continue // evita path traversal
+    fs.writeFileSync(path.join(destDir, filename), file.buffer)
+    saved.push(filename)
+  }
+  console.log(`📥 Carpeta importada: ${carpeta}/ (${saved.length} archivos)`)
+  res.json({ ok: true, carpeta, archivos: saved })
+})
+
 // GET /api/inspecciones – PROTECTED: requires admin key
 app.get('/api/inspecciones', (req, res) => {
   if (!ADMIN_KEY || req.headers['x-admin-key'] !== ADMIN_KEY) {
