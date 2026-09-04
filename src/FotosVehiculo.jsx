@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { ArrowLeft, Camera, RotateCcw, CheckCircle, Download, X, Save, Upload, Image, Car, Bike, Share2, Zap, ZapOff, Paperclip, AlertTriangle } from 'lucide-react'
 import { analyzeFrameFull, resetGeminiCache, DETECTABLE_STEPS } from './frameAnalyzer'
 
-const APP_VERSION = '1.7.0'
+const APP_VERSION = '1.7.1'
 
 // Preload logo for watermark
 const logoImg = new window.Image()
@@ -29,7 +29,7 @@ const STEPS_AUTO = [
   { id: 'cedula-f',     fullLabel: 'Cédula Frente',             instruction: 'Frente de la cédula del titular.',                 section: 'B', sectionLabel: 'Identificación y Datos', view: 'cedula-frente' },
   { id: 'cedula-d',     fullLabel: 'Cédula Dorso',              instruction: 'Dorso de la cédula del titular.',                  section: 'B', sectionLabel: 'Identificación y Datos', view: 'cedula-dorso' },
   // Sección C – Estado Exterior
-  { id: 'cristales',    fullLabel: 'Cristales y Parabrisas',    instruction: 'Registro de daños en cristales.',                  section: 'C', sectionLabel: 'Estado Exterior',       view: 'cristales' },
+  { id: 'cristales',    fullLabel: 'Cristales y Parabrisas',    instruction: 'Parabrisas sacado desde adentro hacia afuera. Registro de daños en cristales.', section: 'C', sectionLabel: 'Estado Exterior', view: 'cristales' },
   { id: 'neumaticos',   fullLabel: 'Neumáticos (Desgaste)',     instruction: 'Detalle del estado y desgaste.',                   section: 'C', sectionLabel: 'Estado Exterior',       view: 'neumaticos' },
   { id: 'rueda-auxilio', fullLabel: 'Rueda de Auxilio',         instruction: 'Rueda de auxilio en el baúl o donde corresponda.',  section: 'C', sectionLabel: 'Estado Exterior',       view: 'rueda-auxilio' },
 ]
