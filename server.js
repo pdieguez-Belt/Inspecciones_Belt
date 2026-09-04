@@ -743,12 +743,25 @@ app.get('/api/crm/inspecciones', (req, res) => {
         // datos.txt existe?
         const tiene_datos = fs.existsSync(path.join(dirPath, 'datos.txt'))
 
+        // El CRM (Python) formatea estos timestamps con la timezone por
+        // defecto del server (UTC en Railway), sin convertir a Argentina.
+        // Como Argentina es UTC-3 fijo (sin horario de verano), restamos
+        // 3hs antes de enviarlos: así el CRM, al mostrarlos "tal cual" en
+        // UTC, termina mostrando la hora de Argentina correcta sin tocar
+        // su código.
+        const ART_OFFSET_MS = 3 * 3600 * 1000
+        const metaAjustada = { ...meta }
+        if (meta.fecha) {
+          const t = Date.parse(meta.fecha)
+          if (!isNaN(t)) metaAjustada.fecha = new Date(t - ART_OFFSET_MS).toISOString()
+        }
+
         return {
           nombre: d.name,
-          mtime: stat.mtime.getTime() / 1000,  // epoch seconds (Python compatible)
+          mtime: stat.mtime.getTime() / 1000 - ART_OFFSET_MS / 1000,  // epoch seconds (Python compatible)
           fotos,
           n_fotos: fotos.length,
-          meta,
+          meta: metaAjustada,
           tiene_datos,
         }
       })
