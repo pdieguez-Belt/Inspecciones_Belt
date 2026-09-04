@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { ArrowLeft, Camera, RotateCcw, CheckCircle, Download, X, Save, Upload, Image, Car, Bike, Share2, Zap, ZapOff, Paperclip, AlertTriangle } from 'lucide-react'
 import { analyzeFrameFull, resetGeminiCache, DETECTABLE_STEPS } from './frameAnalyzer'
 
-const APP_VERSION = '1.6.2'
+const APP_VERSION = '1.6.3'
 
 // Preload logo for watermark
 const logoImg = new window.Image()

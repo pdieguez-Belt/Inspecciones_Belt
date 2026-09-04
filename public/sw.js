@@ -1,4 +1,4 @@
-const CACHE_NAME = 'belt-fotos-v16'
+const CACHE_NAME = 'belt-fotos-v17'
 const PRECACHE = ['/manifest.json']
 
 self.addEventListener('install', (e) => {
