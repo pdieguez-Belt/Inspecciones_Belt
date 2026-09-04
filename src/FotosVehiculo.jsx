@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { ArrowLeft, Camera, RotateCcw, CheckCircle, Download, X, Save, Upload, Image, Car, Bike, Share2, Zap, ZapOff, Paperclip, AlertTriangle } from 'lucide-react'
 import { analyzeFrameFull, resetGeminiCache, DETECTABLE_STEPS } from './frameAnalyzer'
 
-const APP_VERSION = '1.6.3'
+const APP_VERSION = '1.6.4'
 
 // Preload logo for watermark
 const logoImg = new window.Image()
@@ -208,6 +208,57 @@ export default function FotosVehiculo() {
   useEffect(() => {
     const id = setInterval(() => setClock(new Date()), 1000)
     return () => clearInterval(id)
+  }, [])
+
+  // Diagnóstico: mostrar cualquier error de JS/promesa directamente en pantalla
+  // (para poder ver el motivo real de un "freeze" sin acceso a devtools remoto)
+  useEffect(() => {
+    const showJsError = (msg) => {
+      let box = document.getElementById('belt-js-error-box')
+      if (!box) {
+        box = document.createElement('div')
+        box.id = 'belt-js-error-box'
+        box.style.position = 'fixed'
+        box.style.top = '0'
+        box.style.left = '0'
+        box.style.right = '0'
+        box.style.zIndex = '999999'
+        box.style.background = '#b91c1c'
+        box.style.color = '#fff'
+        box.style.padding = '10px 14px'
+        box.style.fontSize = '12px'
+        box.style.fontFamily = 'monospace'
+        box.style.whiteSpace = 'pre-wrap'
+        box.style.maxHeight = '35vh'
+        box.style.overflowY = 'auto'
+        const closeBtn = document.createElement('button')
+        closeBtn.textContent = 'X cerrar'
+        closeBtn.style.display = 'block'
+        closeBtn.style.marginBottom = '6px'
+        closeBtn.style.background = '#fff'
+        closeBtn.style.color = '#b91c1c'
+        closeBtn.style.fontWeight = 'bold'
+        closeBtn.style.padding = '4px 10px'
+        closeBtn.style.borderRadius = '6px'
+        closeBtn.onclick = () => box.remove()
+        box.appendChild(closeBtn)
+        const pre = document.createElement('div')
+        pre.id = 'belt-js-error-text'
+        box.appendChild(pre)
+        document.body.appendChild(box)
+      }
+      const pre = document.getElementById('belt-js-error-text')
+      const time = new Date().toLocaleTimeString()
+      pre.textContent += `[${time}] ${msg}\n\n`
+    }
+    const onError = (e) => showJsError(`ERROR: ${e.message} @ ${e.filename}:${e.lineno}`)
+    const onRejection = (e) => showJsError(`PROMISE: ${e.reason?.message || e.reason}`)
+    window.addEventListener('error', onError)
+    window.addEventListener('unhandledrejection', onRejection)
+    return () => {
+      window.removeEventListener('error', onError)
+      window.removeEventListener('unhandledrejection', onRejection)
+    }
   }, [])
 
   // Geolocation: get position + reverse geocode for locality
