@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { ArrowLeft, Camera, RotateCcw, CheckCircle, Download, X, Save, Upload, Image, Car, Bike, Share2, Zap, ZapOff, Paperclip, AlertTriangle } from 'lucide-react'
 import { analyzeFrameFull, resetGeminiCache, DETECTABLE_STEPS } from './frameAnalyzer'
 
-const APP_VERSION = '1.6.4'
+const APP_VERSION = '1.7.0'
 
 // Preload logo for watermark
 const logoImg = new window.Image()
@@ -17,7 +17,7 @@ function generarNumeroGestion() {
   return `BELT-${year}${month}${day}-${random}`
 }
 
-// ── AUTO: 9 fotos en 3 secciones ──
+// ── AUTO: 10 fotos en 3 secciones ──
 const STEPS_AUTO = [
   // Sección A – Fotos del Auto
   { id: 'frente',       fullLabel: 'Frente (Patente Visible)',  instruction: 'Patente legible. Faros en cuadro.',                section: 'A', sectionLabel: 'Fotos del Auto',        view: 'front' },
@@ -31,6 +31,7 @@ const STEPS_AUTO = [
   // Sección C – Estado Exterior
   { id: 'cristales',    fullLabel: 'Cristales y Parabrisas',    instruction: 'Registro de daños en cristales.',                  section: 'C', sectionLabel: 'Estado Exterior',       view: 'cristales' },
   { id: 'neumaticos',   fullLabel: 'Neumáticos (Desgaste)',     instruction: 'Detalle del estado y desgaste.',                   section: 'C', sectionLabel: 'Estado Exterior',       view: 'neumaticos' },
+  { id: 'rueda-auxilio', fullLabel: 'Rueda de Auxilio',         instruction: 'Rueda de auxilio en el baúl o donde corresponda.',  section: 'C', sectionLabel: 'Estado Exterior',       view: 'rueda-auxilio' },
 ]
 
 // ── MOTO: 9 fotos en 2 secciones ──
@@ -75,6 +76,7 @@ const VIEW_TO_IMG = {
   'dni-dorso':       '/img/dni-dorso.png',
   'cristales':       '/img/cristales.png',
   'neumaticos':      '/img/neumaticos.png',
+  'rueda-auxilio':   '/img/neumaticos.png',
   'moto-front':      '/img/moto-frente.png',
   'moto-side':       '/img/moto-lateral.png',
   'moto-side-flip':  '/img/moto-lateral.png',
@@ -200,7 +202,7 @@ export default function FotosVehiculo() {
   const STEPS = vehicleType === 'moto' ? STEPS_MOTO : STEPS_AUTO
   const step = STEPS[stepIdx] || STEPS[0]
   const isSide = step.view === 'side' || step.view === 'side-flip' || step.view === 'moto-side' || step.view === 'moto-side-flip'
-  const isDoc = ['tablero','cedula-frente','cedula-dorso','dni-frente','dni-dorso','cristales','neumaticos','chasis','motor'].includes(step.view)
+  const isDoc = ['tablero','cedula-frente','cedula-dorso','dni-frente','dni-dorso','cristales','neumaticos','rueda-auxilio','chasis','motor'].includes(step.view)
   const sections = [...new Set(STEPS.map(s => s.section))]
   const currentSectionIdx = sections.indexOf(step.section)
 
