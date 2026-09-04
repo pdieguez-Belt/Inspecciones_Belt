@@ -211,8 +211,12 @@ export default function FotosVehiculo() {
   }, [])
 
   // Geolocation: get position + reverse geocode for locality
+  // Se pide DESPUÉS de que la cámara esté lista (no en simultáneo con
+  // getUserMedia): pedir permiso de cámara y de ubicación al mismo tiempo
+  // hace que en varios navegadores móviles uno de los dos prompts quede
+  // colgado indefinidamente, congelando la app en el primer ingreso a cámara.
   useEffect(() => {
-    if (!vehicleType) return
+    if (!vehicleType || !camReady) return
     if (!navigator.geolocation) return
     let geocoded = false
     const watchId = navigator.geolocation.watchPosition(
@@ -241,7 +245,7 @@ export default function FotosVehiculo() {
       { enableHighAccuracy: true, maximumAge: 10000 }
     )
     return () => navigator.geolocation.clearWatch(watchId)
-  }, [vehicleType])
+  }, [vehicleType, camReady])
 
   // Re-init camera whenever we enter camera phase and stream is dead
   // (single source of truth: evita pedir getUserMedia() dos veces en simultáneo
