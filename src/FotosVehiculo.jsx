@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { ArrowLeft, Camera, RotateCcw, CheckCircle, Download, X, Save, Upload, Image, Car, Bike, Share2, Zap, ZapOff, Paperclip, AlertTriangle } from 'lucide-react'
 import { analyzeFrameFull, resetGeminiCache, DETECTABLE_STEPS } from './frameAnalyzer'
 
-const APP_VERSION = '1.7.1'
+const APP_VERSION = '1.7.2'
 
 // Preload logo for watermark
 const logoImg = new window.Image()
@@ -32,6 +32,8 @@ const STEPS_AUTO = [
   { id: 'cristales',    fullLabel: 'Cristales y Parabrisas',    instruction: 'Parabrisas sacado desde adentro hacia afuera. Registro de daños en cristales.', section: 'C', sectionLabel: 'Estado Exterior', view: 'cristales' },
   { id: 'neumaticos',   fullLabel: 'Neumáticos (Desgaste)',     instruction: 'Detalle del estado y desgaste.',                   section: 'C', sectionLabel: 'Estado Exterior',       view: 'neumaticos' },
   { id: 'rueda-auxilio', fullLabel: 'Rueda de Auxilio',         instruction: 'Rueda de auxilio en el baúl o donde corresponda.',  section: 'C', sectionLabel: 'Estado Exterior',       view: 'rueda-auxilio' },
+  // Sección D – Documento opcional (0 km)
+  { id: 'no-rodamiento', fullLabel: 'Documento No Rodamiento', instruction: 'Solo para 0 km. Foto del documento completo.', section: 'D', sectionLabel: 'Documento 0 km', view: 'no-rodamiento', optional: true },
 ]
 
 // ── MOTO: 9 fotos en 2 secciones ──
@@ -47,6 +49,8 @@ const STEPS_MOTO = [
   { id: 'tablero',      fullLabel: 'Tablero',                   instruction: 'Foto con el tablero encendido.',                   section: 'B', sectionLabel: 'Identificación y Datos', view: 'tablero' },
   { id: 'cedula-f',     fullLabel: 'Cédula Frente',             instruction: 'Frente de la cédula del titular.',                 section: 'B', sectionLabel: 'Identificación y Datos', view: 'cedula-frente' },
   { id: 'cedula-d',     fullLabel: 'Cédula Dorso',              instruction: 'Dorso de la cédula del titular.',                  section: 'B', sectionLabel: 'Identificación y Datos', view: 'cedula-dorso' },
+  // Sección D – Documento opcional (0 km)
+  { id: 'no-rodamiento', fullLabel: 'Documento No Rodamiento', instruction: 'Solo para 0 km. Foto del documento completo.', section: 'D', sectionLabel: 'Documento 0 km', view: 'no-rodamiento', optional: true },
 ]
 
 // ── Imágenes de referencia para chasis y motor ──
@@ -202,7 +206,7 @@ export default function FotosVehiculo() {
   const STEPS = vehicleType === 'moto' ? STEPS_MOTO : STEPS_AUTO
   const step = STEPS[stepIdx] || STEPS[0]
   const isSide = step.view === 'side' || step.view === 'side-flip' || step.view === 'moto-side' || step.view === 'moto-side-flip'
-  const isDoc = ['tablero','cedula-frente','cedula-dorso','dni-frente','dni-dorso','cristales','neumaticos','rueda-auxilio','chasis','motor'].includes(step.view)
+  const isDoc = ['tablero','cedula-frente','cedula-dorso','dni-frente','dni-dorso','cristales','neumaticos','rueda-auxilio','chasis','motor','no-rodamiento'].includes(step.view)
   const sections = [...new Set(STEPS.map(s => s.section))]
   const currentSectionIdx = sections.indexOf(step.section)
 
@@ -397,8 +401,15 @@ export default function FotosVehiculo() {
   }, [camReady, stepIdx, geoCoords, geoLocality])
 
   const handleNext = () => {
-    if (stepIdx < STEPS.length - 1) { setStepIdx(s => s + 1); setPhase('camera') }
+    if (STEPS[stepIdx + 1]?.optional) setPhase('cero-km')  // documento solo si es 0 km
+    else if (stepIdx < STEPS.length - 1) { setStepIdx(s => s + 1); setPhase('camera') }
     else setPhase('form')  // Go to DNI/Patente form
+  }
+
+  const handleEsCeroKm = (si) => {
+    setPreview(null)
+    if (si) { setStepIdx(STEPS.length - 1); setPhase('camera') }
+    else setPhase('form')
   }
 
   const handleRetake = () => {
@@ -408,7 +419,7 @@ export default function FotosVehiculo() {
   }
 
   // Pick from gallery (for Cedula steps)
-  const isCedulaStep = step.id === 'cedula-f' || step.id === 'cedula-d'
+  const isCedulaStep = step.id === 'cedula-f' || step.id === 'cedula-d' || step.id === 'no-rodamiento'
   const handleGalleryPick = () => {
     if (fileInputRef.current) fileInputRef.current.click()
   }
@@ -909,6 +920,20 @@ export default function FotosVehiculo() {
     </div>
   )
 
+  // ── ¿Es 0 km? (pide el documento de No Rodamiento solo si es 0 km) ──
+  if (phase === 'cero-km') return (
+    <div className="min-h-screen bg-belt-dark flex flex-col items-center justify-center px-6 safe-top safe-bottom">
+      <p className="text-white font-black text-2xl text-center mb-2">¿El vehículo es 0 km?</p>
+      <p className="text-gray-400 text-base text-center mb-8">Si es 0 km, te pedimos una foto del Documento de No Rodamiento.</p>
+      <button onClick={() => handleEsCeroKm(true)} className="w-full btn-primary flex items-center justify-center gap-2 py-4 text-lg mb-3">
+        <Camera size={20}/> Sí, es 0 km
+      </button>
+      <button onClick={() => handleEsCeroKm(false)} className="w-full flex items-center justify-center gap-2 bg-white/10 active:bg-white/20 text-white font-bold py-4 rounded-xl text-lg">
+        No
+      </button>
+    </div>
+  )
+
   // ── FORM screen (Patente) ──────────────────────────────────
   if (phase === 'form') return (
     <div className="min-h-screen bg-belt-dark flex flex-col safe-top safe-bottom">
@@ -998,7 +1023,7 @@ export default function FotosVehiculo() {
       <div className="flex-shrink-0 bg-belt-dark px-4 py-4 space-y-3 safe-bottom">
         {stepIdx < STEPS.length - 1 && (
           <p className="text-center text-sm text-gray-400">
-            Siguiente: <span className="text-white font-semibold">{STEPS[stepIdx + 1].fullLabel}</span>
+            Siguiente: <span className="text-white font-semibold">{STEPS[stepIdx + 1].optional ? '¿Es 0 km?' : STEPS[stepIdx + 1].fullLabel}</span>
           </p>
         )}
         <div className="flex gap-3">

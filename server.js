@@ -79,11 +79,27 @@ async function upsertVehiculo({ dni, carpeta, tipo, data }) {
 
 // Escribe un bloc de notas (datos.txt) con los datos de la cédula dentro de la carpeta
 function writeDatosTxt({ dni, carpeta, tipo, data }) {
+  data = data || {}
   try {
     const destDir = path.join(DB_BASE, path.basename(carpeta))
     if (!fs.existsSync(destDir)) return
     const dash = (v) => (v && v.trim() ? v.trim() : '-')
     const fecha = new Date().toLocaleString('es-AR', { dateStyle: 'long', timeStyle: 'short' })
+    // Si ya había un datos.txt (p. ej. de la cédula), se conservan los valores que el nuevo documento no trae
+    const prev = {}
+    const prevPath = path.join(destDir, 'datos.txt')
+    if (fs.existsSync(prevPath)) {
+      const claves = { 'Dominio': 'dominio', 'Marca': 'marca', 'Modelo': 'modelo', 'N. Chasis': 'chasis', 'N. Motor': 'motor', 'N. Cuadro': 'cuadro', 'Anio': 'anio', 'Es 0km': 'es_0km' }
+      for (const linea of fs.readFileSync(prevPath, 'utf-8').split(/\r?\n/)) {
+        const i = linea.indexOf(':')
+        const k = i > 0 ? claves[linea.slice(0, i).trim()] : null
+        const v = i > 0 ? linea.slice(i + 1).trim() : ''
+        if (k && v && v !== '-') prev[k] = v
+      }
+    }
+    const merged = { ...prev }
+    for (const [k, v] of Object.entries(data)) if (v && String(v).trim()) merged[k] = v
+    data = merged
     const contenido =
 `==========================================
    BELT SEGUROS - DATOS DEL VEHICULO
@@ -98,9 +114,11 @@ Modelo:         ${dash(data.modelo)}
 N. Chasis:      ${dash(data.chasis)}
 N. Motor:       ${dash(data.motor)}
 N. Cuadro:      ${dash(data.cuadro)}
+Anio:           ${dash(data.anio)}
+Es 0km:         ${dash(data.es_0km)}
 ------------------------------------------
 Actualizado:    ${fecha}
-(Datos extraidos automaticamente de la cedula)
+(Datos extraidos automaticamente de la cedula / documento de no rodamiento)
 `
     fs.writeFileSync(path.join(destDir, 'datos.txt'), contenido, 'utf-8')
     console.log(`📝 datos.txt escrito en ${carpeta}`)
@@ -253,6 +271,24 @@ Reglas:
 - Si un dato no se ve o no está, dejá el valor como string vacío "".
 - No inventes ni completes datos por suposición. Es preferible dejar un campo vacío antes que adivinar mal.`
 
+const NO_RODAMIENTO_PROMPT = `Sos un extractor de datos de certificados de "no rodamiento" argentinos: el documento que emite una concesionaria o fábrica para un vehículo 0 km que todavía no fue patentado ni usado (dice algo como "certifico que la unidad 0 KM cuyos datos se indican a continuación se encuentra en el concesionario ... sin rodar") y lista tipo, marca, modelo, motor, chasis y año.
+
+PASO 1 — ANÁLISIS (obligatorio, en texto plano antes del JSON):
+Para "chasis" y "motor" transcribí el valor carácter por carácter, indicando para cada carácter dudoso qué otra letra/número podría confundirse. Prestá especial atención a: O/0, I/1/L, B/8, S/5, Z/2, G/6, U/V. Si el número está borroso, con reflejo o tapado, decilo explícitamente.
+
+PASO 2 — JSON FINAL (obligatorio):
+Después del análisis, escribí la línea "JSON_FINAL:" seguida SOLO del JSON en la línea siguiente, con estas claves EXACTAS y nada más de texto después:
+{"marca": "", "modelo": "", "anio": "", "chasis": "", "motor": "", "es_0km_certificado": false}
+
+Reglas:
+- "marca": marca del vehículo (ej: CFMOTO, TOYOTA).
+- "modelo": SOLO el nombre del modelo, corto (ej: 800MT-X, HILUX, ONIX).
+- "anio": año del vehículo, 4 dígitos. Si no figura, vacío.
+- "chasis": número de chasis / VIN / cuadro. SOLO completalo si leíste TODOS los caracteres con confianza alta; si tenés dudas, dejalo vacío "".
+- "motor": número de motor, sin espacios (ej: 288MW SK23810 -> 288MWSK23810).
+- "es_0km_certificado": true SOLO si el documento certifica que la unidad es 0 km / sin rodar / de no rodamiento; false en cualquier otro caso.
+- Transcribí exactamente lo que leas, en MAYÚSCULAS. Si un dato no se ve o no está, dejalo como string vacío "". No inventes datos.`
+
 // El VIN/chasis de vehículos no arranca con la letra "B" (no es un carácter válido
 // como primer dígito en los prefijos que usan las terminales locales). Si el OCR
 // lo transcribió así, es casi siempre una confusión visual con el número "8".
@@ -262,7 +298,9 @@ function fixChasisLeadingB(value) {
 }
 
 // Extrae datos de la cédula usando Claude. Devuelve objeto o null.
-async function extractCedulaData(imageBuffer, mimeType = 'image/jpeg') {
+// documento: 'cedula' (default) o 'no_rodamiento' (certificado de 0 km).
+async function extractCedulaData(imageBuffer, mimeType = 'image/jpeg', documento = 'cedula') {
+  const esNoRod = documento === 'no_rodamiento'
   if (!ANTHROPIC_KEY) {
     console.log('⚠️  ANTHROPIC_KEY no configurada. Saltando OCR de cédula.')
     return null
@@ -282,7 +320,7 @@ async function extractCedulaData(imageBuffer, mimeType = 'image/jpeg') {
           role: 'user',
           content: [
             { type: 'image', source: { type: 'base64', media_type: mimeType, data: imageBuffer.toString('base64') } },
-            { type: 'text', text: CEDULA_PROMPT },
+            { type: 'text', text: esNoRod ? NO_RODAMIENTO_PROMPT : CEDULA_PROMPT },
           ],
         }],
       }),
@@ -305,14 +343,21 @@ async function extractCedulaData(imageBuffer, mimeType = 'image/jpeg') {
     }
     console.log('🔎 OCR cédula - análisis:', text.slice(0, markerIdx >= 0 ? markerIdx : 0).trim().slice(0, 500))
     const parsed = JSON.parse(match[0])
-    return {
-      dominio: (parsed.dominio || '').toString().trim().toUpperCase(),
-      marca: (parsed.marca || '').toString().trim().toUpperCase(),
-      modelo: (parsed.modelo || '').toString().trim().toUpperCase(),
-      chasis: fixChasisLeadingB((parsed.chasis || '').toString().trim().toUpperCase()),
-      motor: (parsed.motor || '').toString().trim().toUpperCase(),
-      cuadro: fixChasisLeadingB((parsed.cuadro || '').toString().trim().toUpperCase()),
+    const up = (v) => (v || '').toString().trim().toUpperCase()
+    const out = {
+      dominio: up(parsed.dominio),
+      marca: up(parsed.marca),
+      modelo: up(parsed.modelo),
+      chasis: fixChasisLeadingB(up(parsed.chasis)),
+      motor: esNoRod ? up(parsed.motor).replace(/\s+/g, '') : up(parsed.motor),
+      cuadro: fixChasisLeadingB(up(parsed.cuadro)),
     }
+    if (esNoRod) {
+      out.anio = up(parsed.anio).replace(/\D/g, '').slice(0, 4)
+      // Solo se marca 0 km si el documento lo certifica (una cédula nunca lo marca)
+      if (String(parsed.es_0km_certificado).trim().toLowerCase() === 'true') out.es_0km = 'SI'
+    }
+    return out
   } catch (err) {
     console.error('❌ Error en OCR de cédula:', err.message)
     return null
@@ -436,11 +481,18 @@ app.post('/api/guardar-inspeccion', (req, res, next) => {
   let pasos = []
   try { pasos = JSON.parse(req.body.pasos || '[]') } catch (e) { pasos = [] }
   const cedulaIdx = pasos.indexOf('cedula-f')
-  if (cedulaIdx >= 0 && req.files[cedulaIdx]) {
-    const cedulaBuffer = req.files[cedulaIdx].buffer
-    extractCedulaData(cedulaBuffer).then(async data => {
-      if (data) await guardarDatosVehiculo({ dni: dniClean, carpeta: folderName, tipo: tipo || 'auto', data })
-    }).catch(err => console.error('❌ OCR cédula (guardar):', err.message))
+  const noRodIdx = pasos.indexOf('no-rodamiento')
+  const cedulaFile = cedulaIdx >= 0 ? req.files[cedulaIdx] : null
+  const noRodFile = noRodIdx >= 0 ? req.files[noRodIdx] : null
+  if (cedulaFile || noRodFile) {
+    // Primero la cédula y después el documento de no rodamiento: los datos de la cédula tienen prioridad
+    ;(async () => {
+      const dCedula = cedulaFile ? await extractCedulaData(cedulaFile.buffer) : null
+      const dNoRod = noRodFile ? await extractCedulaData(noRodFile.buffer, 'image/jpeg', 'no_rodamiento') : null
+      const data = { ...(dNoRod || {}) }
+      for (const [k, v] of Object.entries(dCedula || {})) if (v) data[k] = v
+      if (dNoRod || dCedula) await guardarDatosVehiculo({ dni: dniClean, carpeta: folderName, tipo: tipo || 'auto', data })
+    })().catch(err => console.error('❌ OCR cédula/no rodamiento (guardar):', err.message))
   }
 })
 
@@ -699,9 +751,10 @@ app.post('/api/corregir-inspeccion', (req, res, next) => {
   sendCorrectionEmail({ dni: dniClean, carpeta: carpetaSafe, foto: filename, tipo: tipo || 'auto', fecha, etiqueta })
 
   // Si se corrigió la cédula frente, re-extraer datos y actualizar PostgreSQL
-  if (req.body.stepId === 'cedula-f') {
+  if (req.body.stepId === 'cedula-f' || req.body.stepId === 'no-rodamiento') {
     const buf = req.file.buffer
-    extractCedulaData(buf).then(async data => {
+    const documento = req.body.stepId === 'no-rodamiento' ? 'no_rodamiento' : 'cedula'
+    extractCedulaData(buf, 'image/jpeg', documento).then(async data => {
       if (data) await guardarDatosVehiculo({ dni: dniClean, carpeta: carpetaSafe, tipo: tipo || 'auto', data })
     }).catch(err => console.error('❌ OCR cédula (corrección):', err.message))
   }
